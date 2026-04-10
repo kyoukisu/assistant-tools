@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 import tomllib
 from typing import Any
+from typing import cast
 
 from assistant_tools.models import AppConfig
 from assistant_tools.models import ExtractConfig
@@ -20,8 +21,9 @@ def _section(data: dict[str, Any], key: str) -> dict[str, Any]:
     section_value: Any = data.get(key, {})
     if not isinstance(section_value, dict):
         raise ValueError(f"Config section '{key}' must be a table/object")
+    typed_section: dict[object, Any] = cast(dict[object, Any], section_value)
     result: dict[str, Any] = {}
-    for section_key, section_item in section_value.items():
+    for section_key, section_item in typed_section.items():
         result[str(section_key)] = section_item
     return result
 
