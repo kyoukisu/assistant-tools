@@ -1,0 +1,29 @@
+[project]
+name = "assistant-tools"
+version = "0.1.0"
+description = "JSON-only CLI toolbox for search, extract, speech-to-text, and video-to-text"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.28.1",
+]
+
+[project.scripts]
+assistant-tools = "assistant_tools.cli:main"
+
+[tool.uv]
+package = true
+
+[dependency-groups]
+dev = [
+  "pyright>=1.1.405",
+  "ruff>=0.11.8",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pyright]
+typeCheckingMode = "strict"
+include = ["assistant_tools"]
