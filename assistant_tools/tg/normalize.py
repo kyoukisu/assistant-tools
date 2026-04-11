@@ -71,6 +71,17 @@ def normalize_user(user: Any) -> dict[str, Any] | None:
     }
 
 
+def compact_user(user: Any) -> dict[str, Any] | None:
+    normalized: dict[str, Any] | None = normalize_user(user)
+    if normalized is None:
+        return None
+    return {
+        "id": normalized["id"],
+        "username": normalized["username"],
+        "display_name": normalized["display_name"],
+    }
+
+
 def _document_file_name(document: Any) -> str | None:
     attributes: list[Any] = list(getattr(document, "attributes", []) or [])
     for attr in attributes:
@@ -113,16 +124,16 @@ def normalize_media(message: Message) -> dict[str, Any] | None:
 
     document: Any = message.document
     file_name: str | None = _document_file_name(document) if document is not None else None
-    width: int | None = (
-        getattr(message.photo, "sizes", [None])[-1].w
-        if message.photo is not None and getattr(message.photo, "sizes", None)
-        else None
-    )
-    height: int | None = (
-        getattr(message.photo, "sizes", [None])[-1].h
-        if message.photo is not None and getattr(message.photo, "sizes", None)
-        else None
-    )
+    width: int | None = None
+    height: int | None = None
+    if message.photo is not None and getattr(message.photo, "sizes", None):
+        for size in reversed(list(getattr(message.photo, "sizes", []) or [])):
+            size_width: Any = getattr(size, "w", None)
+            size_height: Any = getattr(size, "h", None)
+            if size_width is not None and size_height is not None:
+                width = int(size_width)
+                height = int(size_height)
+                break
     duration: int | None = None
     if document is not None:
         for attr in list(getattr(document, "attributes", []) or []):
@@ -148,12 +159,34 @@ def normalize_media(message: Message) -> dict[str, Any] | None:
     }
 
 
-def normalize_message(message: Message, *, chat_entity: Any | None = None) -> dict[str, Any]:
+def _excerpt_text(text: str | None, max_chars: int = 220) -> str | None:
+    if text is None:
+        return None
+    collapsed: str = " ".join(text.split())
+    if len(collapsed) <= max_chars:
+        return collapsed
+    return collapsed[: max_chars - 1] + "…"
+
+
+def normalize_message(
+    message: Message, *, chat_entity: Any | None = None, full: bool = False
+) -> dict[str, Any]:
     chat: Any = chat_entity or getattr(message, "chat", None)
     sender: Any = getattr(message, "sender", None)
     chat_id: int | None = getattr(chat, "id", None)
     username: str | None = getattr(chat, "username", None)
     message_id: int | None = getattr(message, "id", None)
+    if not full:
+        return {
+            "message_id": message_id,
+            "date": iso_datetime(getattr(message, "date", None)),
+            "from": compact_user(sender),
+            "text": getattr(message, "text", None),
+            "media_type": _media_kind(message),
+            "reply_to_message_id": getattr(
+                getattr(message, "reply_to", None), "reply_to_msg_id", None
+            ),
+        }
     return {
         "chat": normalize_chat(chat),
         "message_id": message_id,
@@ -172,12 +205,35 @@ def normalize_message(message: Message, *, chat_entity: Any | None = None) -> di
     }
 
 
-def normalize_dialog(dialog: Dialog) -> dict[str, Any]:
+def normalize_dialog(dialog: Dialog, *, full: bool = False) -> dict[str, Any]:
     top_message: Any = getattr(dialog, "message", None)
     chat_entity: Any = getattr(dialog, "entity", None)
+    if full:
+        return {
+            "chat": normalize_chat(chat_entity),
+            "top_message": normalize_message(top_message, chat_entity=chat_entity, full=True)
+            if top_message is not None
+            else None,
+            "unread_count": getattr(dialog, "unread_count", None),
+            "unread_mentions_count": getattr(dialog, "unread_mentions_count", None),
+        }
+    last_message_text: str | None = None
+    last_message_media_type: str | None = None
+    last_message_date: str | None = None
+    last_message_id: int | None = None
+    if top_message is not None:
+        last_message_text = _excerpt_text(getattr(top_message, "text", None))
+        last_message_media_type = _media_kind(top_message)
+        last_message_date = iso_datetime(getattr(top_message, "date", None))
+        last_message_id = getattr(top_message, "id", None)
     return {
         "chat": normalize_chat(chat_entity),
-        "top_message": normalize_message(top_message, chat_entity=chat_entity)
+        "last_message": {
+            "message_id": last_message_id,
+            "date": last_message_date,
+            "text": last_message_text,
+            "media_type": last_message_media_type,
+        }
         if top_message is not None
         else None,
         "unread_count": getattr(dialog, "unread_count", None),

@@ -9,6 +9,7 @@ from typing import Any
 @dataclass(slots=True)
 class NetworkConfig:
     timeout_seconds: float = 60.0
+    proxy: str = ""
 
 
 @dataclass(slots=True)

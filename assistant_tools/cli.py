@@ -101,20 +101,28 @@ def build_parser() -> argparse.ArgumentParser:
 
     tg_dialogs = tg_subparsers.add_parser("dialogs", help="List Telegram dialogs")
     tg_dialogs.add_argument("--limit", type=int, default=20)
+    tg_dialogs.add_argument("--full", action="store_true", help="Return fuller dialog objects")
+
+    tg_participants = tg_subparsers.add_parser("participants", help="List chat participants")
+    tg_participants.add_argument("peer", help="Target peer")
+    tg_participants.add_argument("--limit", type=int, default=200)
 
     tg_history = tg_subparsers.add_parser("history", help="Read chat history")
     tg_history.add_argument("peer", help="Peer id, username, or me")
     tg_history.add_argument("--limit", type=int, default=20)
     tg_history.add_argument("--offset-id", type=int, default=0)
+    tg_history.add_argument("--full", action="store_true", help="Return fuller message objects")
 
     tg_get = tg_subparsers.add_parser("get", help="Get message(s) from a chat")
     tg_get.add_argument("peer", help="Peer id or username")
     tg_get.add_argument("message_ids", nargs="+", type=int, help="One or more message ids")
+    tg_get.add_argument("--full", action="store_true", help="Return fuller message objects")
 
     tg_send = tg_subparsers.add_parser("send", help="Send text message")
     tg_send.add_argument("peer", help="Target peer")
     tg_send.add_argument("text", help="Message text")
     tg_send.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send.add_argument("--full", action="store_true", help="Return fuller sent message object")
 
     tg_react = tg_subparsers.add_parser("react", help="React to a message")
     tg_react.add_argument("peer", help="Target peer")
@@ -125,20 +133,26 @@ def build_parser() -> argparse.ArgumentParser:
     tg_search.add_argument("peer", help="Target peer")
     tg_search.add_argument("query", help="Search query")
     tg_search.add_argument("--limit", type=int, default=20)
+    tg_search.add_argument("--full", action="store_true", help="Return fuller message objects")
 
     tg_media_info = tg_subparsers.add_parser("media-info", help="Show media metadata")
     tg_media_info.add_argument("peer", help="Target peer")
     tg_media_info.add_argument("message_id", type=int, help="Message id")
+    tg_media_info.add_argument("--full", action="store_true", help="Include full message object")
 
     tg_media_download = tg_subparsers.add_parser("media-download", help="Download message media")
     tg_media_download.add_argument("peer", help="Target peer")
     tg_media_download.add_argument("message_id", type=int, help="Message id")
     tg_media_download.add_argument("--output-dir", default=None, help="Output directory override")
+    tg_media_download.add_argument(
+        "--full", action="store_true", help="Include full message object"
+    )
 
     tg_copy = tg_subparsers.add_parser("copy", help="Copy message to another chat")
     tg_copy.add_argument("source_peer", help="Source peer")
     tg_copy.add_argument("message_id", type=int, help="Source message id")
     tg_copy.add_argument("target_peer", help="Target peer")
+    tg_copy.add_argument("--full", action="store_true", help="Return fuller copied message object")
 
     return parser
 
@@ -173,6 +187,7 @@ def run_stt(
         timestamps=timestamps,
         temperature=config.stt.temperature,
         prompt=prompt,
+        proxy=config.network.proxy or None,
     )
     return CommandResult(
         ok=True,
@@ -211,6 +226,7 @@ def run_search(
         include_domains=include_domains,
         max_chars_per_result=config.search.max_chars_per_result,
         max_chars_total=config.search.max_chars_total,
+        proxy=config.network.proxy or None,
     )
     return CommandResult(
         ok=True,
@@ -245,6 +261,7 @@ def run_extract(
         timeout_seconds=config.network.timeout_seconds,
         full_content=bool(args.full_content or config.extract.full_content),
         max_chars_per_result=config.extract.max_chars_per_result,
+        proxy=config.network.proxy or None,
     )
     return CommandResult(
         ok=True,
@@ -279,6 +296,7 @@ def run_vtt(
         mode=mode,
         lang=lang,
         text=text,
+        proxy=config.network.proxy or None,
     )
 
     if status_code == 202 and wait:
@@ -289,6 +307,7 @@ def run_vtt(
             timeout_seconds=config.network.timeout_seconds,
             poll_interval_seconds=config.vtt.poll_interval_seconds,
             wait_timeout_seconds=config.vtt.wait_timeout_seconds,
+            proxy=config.network.proxy or None,
         )
 
     return CommandResult(
@@ -339,18 +358,20 @@ def dispatch(
         if args.tg_command == "resolve":
             return tg_commands.run(tg_commands.resolve_peer(tg_config, args.peer))
         if args.tg_command == "dialogs":
-            return tg_commands.run(tg_commands.dialogs(tg_config, args.limit))
+            return tg_commands.run(tg_commands.dialogs(tg_config, args.limit, args.full))
+        if args.tg_command == "participants":
+            return tg_commands.run(tg_commands.participants(tg_config, args.peer, args.limit))
         if args.tg_command == "history":
             return tg_commands.run(
-                tg_commands.history(tg_config, args.peer, args.limit, args.offset_id)
+                tg_commands.history(tg_config, args.peer, args.limit, args.offset_id, args.full)
             )
         if args.tg_command == "get":
             return tg_commands.run(
-                tg_commands.get_messages(tg_config, args.peer, list(args.message_ids))
+                tg_commands.get_messages(tg_config, args.peer, list(args.message_ids), args.full)
             )
         if args.tg_command == "send":
             return tg_commands.run(
-                tg_commands.send_message(tg_config, args.peer, args.text, args.reply_to)
+                tg_commands.send_message(tg_config, args.peer, args.text, args.reply_to, args.full)
             )
         if args.tg_command == "react":
             return tg_commands.run(
@@ -358,18 +379,22 @@ def dispatch(
             )
         if args.tg_command == "search":
             return tg_commands.run(
-                tg_commands.search_messages(tg_config, args.peer, args.query, args.limit)
+                tg_commands.search_messages(tg_config, args.peer, args.query, args.limit, args.full)
             )
         if args.tg_command == "media-info":
-            return tg_commands.run(tg_commands.media_info(tg_config, args.peer, args.message_id))
+            return tg_commands.run(
+                tg_commands.media_info(tg_config, args.peer, args.message_id, args.full)
+            )
         if args.tg_command == "media-download":
             return tg_commands.run(
-                tg_commands.media_download(tg_config, args.peer, args.message_id, args.output_dir)
+                tg_commands.media_download(
+                    tg_config, args.peer, args.message_id, args.output_dir, args.full
+                )
             )
         if args.tg_command == "copy":
             return tg_commands.run(
                 tg_commands.copy_message(
-                    tg_config, args.source_peer, args.message_id, args.target_peer
+                    tg_config, args.source_peer, args.message_id, args.target_peer, args.full
                 )
             )
     raise AssistantToolsError(

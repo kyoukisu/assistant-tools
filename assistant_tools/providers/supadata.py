@@ -19,12 +19,13 @@ def request_transcript(
     mode: str,
     lang: str,
     text: bool,
+    proxy: str | None,
 ) -> tuple[int, dict[str, Any]]:
     params: dict[str, Any] = {"url": url, "mode": mode, "text": str(text).lower()}
     if lang:
         params["lang"] = lang
 
-    with build_client(timeout_seconds) as client:
+    with build_client(timeout_seconds, proxy) as client:
         response = client.get(
             f"{SUPADATA_BASE_URL}/transcript",
             headers={"x-api-key": api_key},
@@ -43,9 +44,10 @@ def poll_transcript_job(
     timeout_seconds: float,
     poll_interval_seconds: float,
     wait_timeout_seconds: float,
+    proxy: str | None,
 ) -> dict[str, Any]:
     deadline: float = time.monotonic() + wait_timeout_seconds
-    with build_client(timeout_seconds) as client:
+    with build_client(timeout_seconds, proxy) as client:
         while True:
             response = client.get(
                 f"{SUPADATA_BASE_URL}/transcript/{job_id}",

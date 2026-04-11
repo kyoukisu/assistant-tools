@@ -8,8 +8,13 @@ import httpx
 from assistant_tools.utils import AssistantToolsError
 
 
-def build_client(timeout_seconds: float) -> httpx.Client:
-    return httpx.Client(timeout=timeout_seconds, follow_redirects=True)
+def build_client(timeout_seconds: float, proxy: str | None = None) -> httpx.Client:
+    return httpx.Client(
+        timeout=timeout_seconds,
+        follow_redirects=True,
+        trust_env=False,
+        proxy=proxy or None,
+    )
 
 
 def raise_for_error_response(response: httpx.Response) -> None:

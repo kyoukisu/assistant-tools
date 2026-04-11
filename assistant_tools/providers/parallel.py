@@ -20,6 +20,7 @@ def search(
     include_domains: list[str],
     max_chars_per_result: int,
     max_chars_total: int,
+    proxy: str | None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "objective": objective,
@@ -39,7 +40,7 @@ def search(
     if source_policy:
         payload["source_policy"] = source_policy
 
-    with build_client(timeout_seconds) as client:
+    with build_client(timeout_seconds, proxy) as client:
         response = client.post(
             f"{PARALLEL_BASE_URL}/v1beta/search",
             headers={"x-api-key": api_key, "Content-Type": "application/json"},
@@ -58,6 +59,7 @@ def extract(
     timeout_seconds: float,
     full_content: bool,
     max_chars_per_result: int,
+    proxy: str | None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "urls": urls,
@@ -67,7 +69,7 @@ def extract(
     if objective:
         payload["objective"] = objective
 
-    with build_client(timeout_seconds) as client:
+    with build_client(timeout_seconds, proxy) as client:
         response = client.post(
             f"{PARALLEL_BASE_URL}/v1beta/extract",
             headers={"x-api-key": api_key, "Content-Type": "application/json"},

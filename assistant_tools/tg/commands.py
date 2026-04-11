@@ -215,48 +215,79 @@ async def resolve_peer(config: ResolvedTgConfig, peer: str) -> CommandResult:
         )
 
 
-async def dialogs(config: ResolvedTgConfig, limit: int) -> CommandResult:
+async def dialogs(config: ResolvedTgConfig, limit: int, full: bool) -> CommandResult:
     async with telegram_client(config) as client:
         items: list[dict[str, Any]] = []
         async for dialog in client.iter_dialogs(limit=limit):
-            items.append(normalize_dialog(dialog))
-        return _ok("tg.dialogs", {"items": items}, {"limit": limit, "profile": config.profile})
+            items.append(normalize_dialog(dialog, full=full))
+        return _ok(
+            "tg.dialogs",
+            {"items": items},
+            {"limit": limit, "profile": config.profile, "full": full},
+        )
 
 
-async def history(config: ResolvedTgConfig, peer: str, limit: int, offset_id: int) -> CommandResult:
+async def participants(config: ResolvedTgConfig, peer: str, limit: int) -> CommandResult:
+    async with telegram_client(config) as client:
+        entity: Any = await client.get_entity(peer)
+        items: list[dict[str, Any]] = []
+        count: int = 0
+        async for user in client.iter_participants(entity):
+            items.append(normalize_user(user) or {})
+            count += 1
+            if limit > 0 and count >= limit:
+                break
+        return _ok(
+            "tg.participants",
+            {"items": items},
+            {"peer": peer, "limit": limit, "profile": config.profile},
+        )
+
+
+async def history(
+    config: ResolvedTgConfig, peer: str, limit: int, offset_id: int, full: bool
+) -> CommandResult:
     async with telegram_client(config) as client:
         entity: Any = await client.get_entity(peer)
         items: list[dict[str, Any]] = []
         async for message in client.iter_messages(entity, limit=limit, offset_id=offset_id):
-            items.append(normalize_message(message, chat_entity=entity))
+            items.append(normalize_message(message, chat_entity=entity, full=full))
         return _ok(
             "tg.history",
             {"items": items},
-            {"peer": peer, "limit": limit, "offset_id": offset_id, "profile": config.profile},
+            {
+                "peer": peer,
+                "limit": limit,
+                "offset_id": offset_id,
+                "profile": config.profile,
+                "full": full,
+            },
         )
 
 
 async def get_messages(
-    config: ResolvedTgConfig, peer: str, message_ids: list[int]
+    config: ResolvedTgConfig, peer: str, message_ids: list[int], full: bool
 ) -> CommandResult:
     async with telegram_client(config) as client:
         entity: Any = await client.get_entity(peer)
         messages: Any = await client.get_messages(entity, ids=message_ids)
         if isinstance(messages, list):
             items: list[dict[str, Any]] = [
-                normalize_message(message, chat_entity=entity) for message in messages if message
+                normalize_message(message, chat_entity=entity, full=full)
+                for message in messages
+                if message
             ]
         else:
-            items = [normalize_message(messages, chat_entity=entity)] if messages else []
+            items = [normalize_message(messages, chat_entity=entity, full=full)] if messages else []
         return _ok(
             "tg.get",
             {"items": items},
-            {"peer": peer, "message_ids": message_ids, "profile": config.profile},
+            {"peer": peer, "message_ids": message_ids, "profile": config.profile, "full": full},
         )
 
 
 async def send_message(
-    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None
+    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool
 ) -> CommandResult:
     async with telegram_client(config) as client:
         entity: Any = await client.get_entity(peer)
@@ -266,8 +297,13 @@ async def send_message(
             message = await client.send_message(entity, text, reply_to=reply_to_message_id)
         return _ok(
             "tg.send",
-            {"message": normalize_message(message, chat_entity=entity)},
-            {"peer": peer, "reply_to_message_id": reply_to_message_id, "profile": config.profile},
+            {"message": normalize_message(message, chat_entity=entity, full=full)},
+            {
+                "peer": peer,
+                "reply_to_message_id": reply_to_message_id,
+                "profile": config.profile,
+                "full": full,
+            },
         )
 
 
@@ -278,21 +314,23 @@ async def react(config: ResolvedTgConfig, peer: str, message_id: int, emoji: str
 
 
 async def search_messages(
-    config: ResolvedTgConfig, peer: str, query: str, limit: int
+    config: ResolvedTgConfig, peer: str, query: str, limit: int, full: bool
 ) -> CommandResult:
     async with telegram_client(config) as client:
         entity: Any = await client.get_entity(peer)
         items: list[dict[str, Any]] = []
         async for message in client.iter_messages(entity, search=query, limit=limit):
-            items.append(normalize_message(message, chat_entity=entity))
+            items.append(normalize_message(message, chat_entity=entity, full=full))
         return _ok(
             "tg.search",
             {"items": items},
-            {"peer": peer, "query": query, "limit": limit, "profile": config.profile},
+            {"peer": peer, "query": query, "limit": limit, "profile": config.profile, "full": full},
         )
 
 
-async def media_info(config: ResolvedTgConfig, peer: str, message_id: int) -> CommandResult:
+async def media_info(
+    config: ResolvedTgConfig, peer: str, message_id: int, full: bool
+) -> CommandResult:
     async with telegram_client(config) as client:
         entity: Any = await client.get_entity(peer)
         message: Any = await client.get_messages(entity, ids=message_id)
@@ -301,15 +339,22 @@ async def media_info(config: ResolvedTgConfig, peer: str, message_id: int) -> Co
         media: dict[str, Any] | None = normalize_media(message)
         if media is None:
             raise _error("not_found", "Message has no media")
+        data: dict[str, Any] = {
+            "message_id": message_id,
+            "chat": normalize_chat(entity),
+            "media": media,
+        }
+        if full:
+            data["message"] = normalize_message(message, chat_entity=entity, full=True)
         return _ok(
             "tg.media-info",
-            {"media": media, "message": normalize_message(message, chat_entity=entity)},
-            {"peer": peer, "message_id": message_id, "profile": config.profile},
+            data,
+            {"peer": peer, "message_id": message_id, "profile": config.profile, "full": full},
         )
 
 
 async def media_download(
-    config: ResolvedTgConfig, peer: str, message_id: int, output_dir: str | None
+    config: ResolvedTgConfig, peer: str, message_id: int, output_dir: str | None, full: bool
 ) -> CommandResult:
     target_dir: Path = Path(output_dir).expanduser() if output_dir else config.download_dir
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -324,24 +369,33 @@ async def media_download(
             raise _error("not_found", "Message has no media")
         downloaded_any: Any = await client.download_media(message, file=str(target_dir))
         downloaded: str | None = downloaded_any if isinstance(downloaded_any, str) else None
+        data: dict[str, Any] = {
+            "path": str(Path(downloaded).expanduser().resolve()) if downloaded else None,
+            "message_id": message_id,
+            "chat": normalize_chat(entity),
+            "media": media,
+        }
+        if full:
+            data["message"] = normalize_message(message, chat_entity=entity, full=True)
         return _ok(
             "tg.media-download",
-            {
-                "path": str(Path(downloaded).expanduser().resolve()) if downloaded else None,
-                "media": media,
-                "message": normalize_message(message, chat_entity=entity),
-            },
+            data,
             {
                 "peer": peer,
                 "message_id": message_id,
                 "output_dir": str(target_dir),
                 "profile": config.profile,
+                "full": full,
             },
         )
 
 
 async def copy_message(
-    config: ResolvedTgConfig, source_peer: str, message_id: int, target_peer: str
+    config: ResolvedTgConfig,
+    source_peer: str,
+    message_id: int,
+    target_peer: str,
+    full: bool,
 ) -> CommandResult:
     async with telegram_client(config) as client:
         source_entity: Any = await client.get_entity(source_peer)
@@ -349,9 +403,13 @@ async def copy_message(
         message: Any = await client.forward_messages(target_entity, message_id, source_entity)
         normalized: dict[str, Any]
         if isinstance(message, list):
-            normalized = normalize_message(message[0], chat_entity=target_entity) if message else {}
+            normalized = (
+                normalize_message(message[0], chat_entity=target_entity, full=full)
+                if message
+                else {}
+            )
         else:
-            normalized = normalize_message(message, chat_entity=target_entity)
+            normalized = normalize_message(message, chat_entity=target_entity, full=full)
         return _ok(
             "tg.copy",
             {"message": normalized},
@@ -360,6 +418,7 @@ async def copy_message(
                 "message_id": message_id,
                 "target_peer": target_peer,
                 "profile": config.profile,
+                "full": full,
             },
         )
 

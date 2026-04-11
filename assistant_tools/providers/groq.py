@@ -20,6 +20,7 @@ def transcribe(
     timestamps: str,
     temperature: float,
     prompt: str,
+    proxy: str | None,
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
         "model": model,
@@ -37,7 +38,7 @@ def transcribe(
         data["timestamp_granularities[]"] = "word"
 
     headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
-    with build_client(timeout_seconds) as client:
+    with build_client(timeout_seconds, proxy) as client:
         if source.startswith("http://") or source.startswith("https://"):
             data["url"] = source
             response = client.post(

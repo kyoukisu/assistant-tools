@@ -53,6 +53,15 @@ Default config path:
 ~/.config/assistant-tools/config.toml
 ```
 
+By default, HTTP tools do **not** inherit shell proxy environment variables.
+If you want proxying for `stt`, `search`, `extract`, or `vtt`, set it explicitly in config:
+
+```toml
+[network]
+timeout_seconds = 60
+proxy = "http://127.0.0.1:7897"
+```
+
 ## Quick usage
 
 ### Speech to text
