@@ -1,12 +1,22 @@
 # assistant-tools
 
-JSON-only CLI toolbox for:
+JSON-only CLI toolbox for personal agent workflows.
+
+Main command:
+
+```bash
+kit
+```
+
+Current command groups:
 
 - `stt` — speech to text via Groq `whisper-large-v3`
 - `search` — web search via Parallel
-- `extract` — URL content extraction via Parallel
+- `extract` — URL extraction via Parallel
 - `vtt` — video to text via Supadata
 - `tg` — Telegram CLI via Kurigram
+
+All command results go to stdout as JSON.
 
 ## Install
 
@@ -15,7 +25,7 @@ cd /home/user/assistant-tools
 uv sync
 ```
 
-Run with:
+Run:
 
 ```bash
 uv run kit --help
@@ -23,11 +33,17 @@ uv run kit --help
 
 ## Secrets
 
-Set these via environment variables:
+These are expected via environment variables:
 
 - `GROQ_API_KEY`
 - `PARALLEL_API_KEY`
 - `SUPADATA_API_KEY`
+- `TELEGRAM_API_ID`
+- `TELEGRAM_API_HASH`
+
+Optional:
+
+- `TELEGRAM_SESSION_STRING`
 
 ## Config
 
@@ -37,16 +53,177 @@ Default config path:
 ~/.config/assistant-tools/config.toml
 ```
 
-All commands are JSON-only and write structured output to stdout.
+## Quick usage
 
-## Examples
+### Speech to text
 
 ```bash
-uv run kit stt ./sample.m4a
-uv run kit search "parallel ai extract api"
-uv run kit extract https://docs.parallel.ai/getting-started/overview
-uv run kit vtt https://www.youtube.com/watch?v=dQw4w9WgXcQ
-uv run kit tg auth status
+kit stt ./voice.ogg
+kit stt ./voice.ogg --timestamps segment
+kit stt https://example.com/audio.mp3
+```
+
+### Web search
+
+```bash
+kit search "parallel ai extract api"
+kit search "nixos home manager sops" --domain nixos.org --domain github.com
+kit search "zed release notes" --after-date 2026-01-01
+```
+
+### URL extract
+
+```bash
+kit extract https://docs.parallel.ai/getting-started/overview
+kit extract https://example.com/post --objective "extract pricing and auth details"
+kit extract https://example.com/post --full-content
+```
+
+### Video to text
+
+```bash
+kit vtt https://www.youtube.com/watch?v=dQw4w9WgXcQ
+kit vtt https://youtu.be/dQw4w9WgXcQ --mode native
+kit vtt https://youtu.be/dQw4w9WgXcQ --chunks
+```
+
+## Telegram
+
+Telegram uses:
+
+- one default profile, usually `main`
+- optional named profiles, selected via `--profile`
+- one session file per profile
+
+You do **not** need to pre-create profiles manually.
+
+New profile flow:
+
+```bash
+kit tg --profile work auth login
+```
+
+That creates and uses the `work` session automatically.
+
+### Telegram auth
+
+Default profile:
+
+```bash
+kit tg auth login
+kit tg auth status
+kit tg auth export-session
+kit tg auth logout
+```
+
+Named profile:
+
+```bash
+kit tg --profile work auth login
+kit tg --profile work auth status
+```
+
+### Telegram reading
+
+```bash
+kit tg dialogs --limit 20
+kit tg resolve me
+kit tg resolve username
+kit tg history me --limit 20
+kit tg get me 1 2 3
+kit tg search me "hello" --limit 20
+```
+
+### Telegram actions
+
+```bash
+kit tg send me "hello"
+kit tg send me "reply text" --reply-to 123
+kit tg react me 123 "🔥"
+kit tg copy me 123 another_chat
+```
+
+### Telegram media
+
+```bash
+kit tg media-info me 123
+kit tg media-download me 123
+kit tg media-download me 123 --output-dir /tmp/tg
+```
+
+## Telegram profiles
+
+Default profile is controlled by:
+
+```toml
+[tg]
+default_profile = "main"
+```
+
+By default:
+
+- `main` uses `~/.local/state/assistant-tools/tg/main.session`
+- other profiles use `~/.local/state/assistant-tools/tg/sessions/<profile>.session`
+
+Examples:
+
+```bash
+kit tg auth login
+kit tg --profile work auth login
+kit tg --profile alt dialogs
+```
+
+Optional explicit profile config:
+
+```toml
+[tg]
+default_profile = "main"
+session_file = "~/.local/state/assistant-tools/tg/main.session"
+session_dir = "~/.local/state/assistant-tools/tg/sessions"
+download_dir = "~/.local/state/assistant-tools/tg/downloads"
+cache_dir = "~/.local/state/assistant-tools/tg/cache"
+
+[tg.profiles.work]
+session_file = "~/.local/state/assistant-tools/tg/work.session"
+
+[tg.profiles.alt]
+session_file = "~/.local/state/assistant-tools/tg/alt.session"
+download_dir = "~/.local/state/assistant-tools/tg/downloads-alt"
+```
+
+## Output contract
+
+All commands return JSON to stdout.
+
+Success shape:
+
+```json
+{
+  "ok": true,
+  "command": "search",
+  "provider": "parallel",
+  "data": {},
+  "error": null,
+  "meta": {}
+}
+```
+
+Error shape:
+
+```json
+{
+  "ok": false,
+  "command": "tg",
+  "provider": "unknown",
+  "data": null,
+  "error": {
+    "type": "missing_env",
+    "message": "Missing required environment variable: TELEGRAM_API_ID"
+  },
+  "meta": {
+    "command": "tg"
+  }
+}
 ```
 
 ## Config example
@@ -60,6 +237,7 @@ model = "whisper-large-v3"
 language = ""
 timestamps = "none"
 temperature = 0.0
+prompt = ""
 
 [search]
 mode = "agentic"
@@ -80,9 +258,11 @@ poll_interval_seconds = 1.0
 wait_timeout_seconds = 180.0
 
 [tg]
+default_profile = "main"
 api_id = 0
 api_hash = ""
 session_file = "~/.local/state/assistant-tools/tg/main.session"
+session_dir = "~/.local/state/assistant-tools/tg/sessions"
 download_dir = "~/.local/state/assistant-tools/tg/downloads"
 cache_dir = "~/.local/state/assistant-tools/tg/cache"
 session_string = ""
@@ -90,4 +270,7 @@ proxy = ""
 takeout = false
 sleep_threshold = 10
 hide_password = false
+
+[tg.profiles.work]
+session_file = "~/.local/state/assistant-tools/tg/work.session"
 ```

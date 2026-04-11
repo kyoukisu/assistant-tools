@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
+from typing import cast
 from typing import Any
 
 
@@ -43,10 +45,23 @@ class VttConfig:
 
 
 @dataclass(slots=True)
+class TgProfileConfig:
+    api_id: int = 0
+    api_hash: str = ""
+    session_file: str = ""
+    download_dir: str = ""
+    cache_dir: str = ""
+    session_string: str = ""
+    proxy: str = ""
+
+
+@dataclass(slots=True)
 class TgConfig:
     api_id: int = 0
     api_hash: str = ""
+    default_profile: str = "main"
     session_file: str = "~/.local/state/assistant-tools/tg/main.session"
+    session_dir: str = "~/.local/state/assistant-tools/tg/sessions"
     download_dir: str = "~/.local/state/assistant-tools/tg/downloads"
     cache_dir: str = "~/.local/state/assistant-tools/tg/cache"
     session_string: str = ""
@@ -54,6 +69,9 @@ class TgConfig:
     takeout: bool = False
     sleep_threshold: int = 10
     hide_password: bool = False
+    profiles: dict[str, TgProfileConfig] = field(
+        default_factory=lambda: cast(dict[str, TgProfileConfig], {})
+    )
 
 
 @dataclass(slots=True)

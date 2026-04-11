@@ -12,6 +12,7 @@ from assistant_tools.models import NetworkConfig
 from assistant_tools.models import SearchConfig
 from assistant_tools.models import SttConfig
 from assistant_tools.models import TgConfig
+from assistant_tools.models import TgProfileConfig
 from assistant_tools.models import VttConfig
 
 
@@ -40,7 +41,24 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     search_config: SearchConfig = SearchConfig(**_section(raw, "search"))
     extract_config: ExtractConfig = ExtractConfig(**_section(raw, "extract"))
     vtt_config: VttConfig = VttConfig(**_section(raw, "vtt"))
-    tg_config: TgConfig = TgConfig(**_section(raw, "tg"))
+    tg_section: dict[str, Any] = _section(raw, "tg")
+    raw_profiles: Any = tg_section.pop("profiles", {})
+    profile_map: dict[str, TgProfileConfig] = {}
+    if raw_profiles:
+        if not isinstance(raw_profiles, dict):
+            raise ValueError("Config section 'tg.profiles' must be a table/object")
+        typed_profiles: dict[object, Any] = cast(dict[object, Any], raw_profiles)
+        for profile_name, profile_value in typed_profiles.items():
+            if not isinstance(profile_value, dict):
+                raise ValueError(
+                    f"Config section 'tg.profiles.{profile_name}' must be a table/object"
+                )
+            typed_profile_value: dict[object, Any] = cast(dict[object, Any], profile_value)
+            profile_data: dict[str, Any] = {}
+            for key, value in typed_profile_value.items():
+                profile_data[str(key)] = value
+            profile_map[str(profile_name)] = TgProfileConfig(**profile_data)
+    tg_config: TgConfig = TgConfig(**tg_section, profiles=profile_map)
 
     return AppConfig(
         network=network_config,

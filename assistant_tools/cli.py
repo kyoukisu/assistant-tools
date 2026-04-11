@@ -79,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     tg_parser = subparsers.add_parser("tg", help="Telegram CLI via Kurigram")
+    tg_parser.add_argument(
+        "--profile",
+        default=None,
+        help="Telegram profile name. Defaults to tg.default_profile",
+    )
     tg_subparsers = tg_parser.add_subparsers(dest="tg_command", required=True)
 
     tg_auth_parser = tg_subparsers.add_parser("auth", help="Telegram auth commands")
@@ -317,7 +322,7 @@ def dispatch(
     if args.command == "vtt":
         return run_vtt(args, config, verbose, config_path)
     if args.command == "tg":
-        tg_config = resolve_tg_config(config)
+        tg_config = resolve_tg_config(config, args.profile)
         if args.tg_command == "auth":
             if args.tg_auth_command == "login":
                 return tg_commands.run(tg_commands.auth_login(tg_config, args.phone))

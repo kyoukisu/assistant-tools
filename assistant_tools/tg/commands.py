@@ -68,6 +68,7 @@ async def auth_export_session(config: ResolvedTgConfig) -> CommandResult:
 
 async def auth_import_session(config: ResolvedTgConfig, session_string: str) -> CommandResult:
     imported_config: ResolvedTgConfig = ResolvedTgConfig(
+        profile=config.profile,
         api_id=config.api_id,
         api_hash=config.api_hash,
         session_file=config.session_file,
