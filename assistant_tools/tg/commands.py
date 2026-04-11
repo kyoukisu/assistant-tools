@@ -247,10 +247,7 @@ async def media_download(
         media: dict[str, Any] | None = normalize_media(message)
         if media is None:
             raise _error("not_found", "Message has no media")
-        downloaded_any: Any = await client.download_media(  # pyright: ignore[reportUnknownMemberType, reportArgumentType]
-            message,
-            file_name=str(target_dir),
-        )
+        downloaded_any: Any = await client.download_media(message, file_name=str(target_dir))  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportCallIssue]
         downloaded: str | None = downloaded_any if isinstance(downloaded_any, str) else None
         return _ok(
             "tg.media-download",
