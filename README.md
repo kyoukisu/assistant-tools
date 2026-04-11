@@ -14,7 +14,7 @@ Current command groups:
 - `search` — web search via Parallel
 - `extract` — URL extraction via Parallel
 - `vtt` — video to text via Supadata
-- `tg` — Telegram CLI via Kurigram
+- `tg` — Telegram CLI via Telethon
 
 All command results go to stdout as JSON.
 

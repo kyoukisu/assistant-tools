@@ -1,16 +1,18 @@
+# pyright: reportMissingTypeStubs=false, reportGeneralTypeIssues=false, reportUnknownMemberType=false, reportAttributeAccessIssue=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportArgumentType=false
+
 from __future__ import annotations
 
 import asyncio
 from getpass import getpass
 from pathlib import Path
 from typing import Any
-from typing import cast
 
-from pyrogram.errors import FloodWait
-from pyrogram.errors import PasswordHashInvalid
-from pyrogram.errors import PeerIdInvalid
-from pyrogram.errors import PhoneCodeInvalid
-from pyrogram.errors import SessionPasswordNeeded
+from telethon import TelegramClient
+from telethon.errors import FloodWaitError
+from telethon.errors import PasswordHashInvalidError
+from telethon.errors import PhoneCodeInvalidError
+from telethon.errors import SessionPasswordNeededError
+from telethon.sessions import StringSession
 
 from assistant_tools.models import CommandResult
 from assistant_tools.tg.client import make_client
@@ -28,7 +30,7 @@ def _ok(command: str, data: dict[str, Any], meta: dict[str, Any]) -> CommandResu
     return CommandResult(
         ok=True,
         command=command,
-        provider="kurigram",
+        provider="telethon",
         data=data,
         error=None,
         meta=meta,
@@ -39,128 +41,198 @@ def _error(code: str, message: str, *, exit_code: int = 1) -> AssistantToolsErro
     return AssistantToolsError(message, error_type=code, exit_code=exit_code)
 
 
+def _is_incompatible_session_error(err: Exception) -> bool:
+    message: str = str(err).lower()
+    return (
+        "no such column: version" in message
+        or "database disk image is malformed" in message
+        or "file is not a database" in message
+    )
+
+
+def _remove_session_files(config: ResolvedTgConfig) -> None:
+    for candidate in [
+        config.session_file,
+        Path(f"{config.session_file}-journal"),
+        Path(f"{config.session_file}-shm"),
+        Path(f"{config.session_file}-wal"),
+    ]:
+        if candidate.exists():
+            candidate.unlink()
+
+
+async def _connect_with_recovery(client: TelegramClient, config: ResolvedTgConfig) -> None:
+    try:
+        await client.connect()
+    except Exception as err:
+        if _is_incompatible_session_error(err):
+            _remove_session_files(config)
+            await client.connect()
+            return
+        raise
+
+
 async def auth_status(config: ResolvedTgConfig) -> CommandResult:
     try:
         async with telegram_client(config) as client:
             me: Any = await client.get_me()
+            if me is None:
+                raise _error("auth_not_configured", "Telegram session is not authorized")
             return _ok(
                 "tg.auth.status",
                 {
                     "authorized": True,
                     "session_file": str(config.session_file),
+                    "profile": config.profile,
                     "user": normalize_user(me),
                 },
-                {"session_file": str(config.session_file)},
+                {"session_file": str(config.session_file), "profile": config.profile},
             )
+    except AssistantToolsError:
+        raise
     except Exception as err:
+        if _is_incompatible_session_error(err):
+            raise _error(
+                "auth_not_configured",
+                "Telegram session file is incompatible with the current backend; rerun 'kit tg auth login'",
+            ) from err
         raise _error("auth_not_configured", f"Telegram session is not ready: {err}") from err
 
 
 async def auth_export_session(config: ResolvedTgConfig) -> CommandResult:
     async with telegram_client(config) as client:
-        session_string: str = await client.export_session_string()
+        session_string: str = StringSession.save(client.session)
         return _ok(
             "tg.auth.export-session",
             {"session_string": session_string},
-            {"session_file": str(config.session_file)},
+            {"session_file": str(config.session_file), "profile": config.profile},
         )
 
 
 async def auth_import_session(config: ResolvedTgConfig, session_string: str) -> CommandResult:
-    imported_config: ResolvedTgConfig = ResolvedTgConfig(
-        profile=config.profile,
-        api_id=config.api_id,
-        api_hash=config.api_hash,
-        session_file=config.session_file,
-        download_dir=config.download_dir,
-        cache_dir=config.cache_dir,
-        session_string=session_string,
-        proxy=config.proxy,
-        takeout=config.takeout,
-        sleep_threshold=config.sleep_threshold,
-        hide_password=config.hide_password,
-    )
-    async with telegram_client(imported_config) as client:
-        me: Any = await client.get_me()
+    imported_client = TelegramClient(StringSession(session_string), config.api_id, config.api_hash)
+    await imported_client.connect()
+    try:
+        me: Any = await imported_client.get_me()
+        if me is None:
+            raise _error("auth_failed", "Imported session string is not authorized")
+        clone_client = TelegramClient(str(config.session_file), config.api_id, config.api_hash)
+        await _connect_with_recovery(clone_client, config)
+        try:
+            clone_client.session.set_dc(
+                imported_client.session.dc_id,
+                imported_client.session.server_address,
+                imported_client.session.port,
+            )
+            clone_client.session.auth_key = imported_client.session.auth_key
+            save_result = clone_client.session.save()  # pyright: ignore[reportArgumentType]
+            if save_result is not None:
+                await save_result
+        finally:
+            disconnect_result = clone_client.disconnect()
+            if disconnect_result is not None:
+                await disconnect_result
+
         return _ok(
             "tg.auth.import-session",
             {
                 "authorized": True,
                 "session_file": str(config.session_file),
+                "profile": config.profile,
                 "user": normalize_user(me),
             },
-            {"session_file": str(config.session_file)},
+            {"session_file": str(config.session_file), "profile": config.profile},
         )
+    finally:
+        disconnect_result = imported_client.disconnect()
+        if disconnect_result is not None:
+            await disconnect_result
 
 
 async def auth_login(config: ResolvedTgConfig, phone: str | None) -> CommandResult:
-    client = make_client(config)
+    client: TelegramClient = make_client(config)
     phone_number: str = phone or input("Phone number: ").strip()
-    await client.connect()
+    await _connect_with_recovery(client, config)
     try:
-        sent_code: Any = await client.send_code(phone_number)
+        sent_code: Any = await client.send_code_request(phone_number)
         code: str = input("Login code: ").strip()
         try:
             await client.sign_in(
-                phone_number=phone_number,
-                phone_code_hash=sent_code.phone_code_hash,
-                phone_code=code,
+                phone=phone_number, code=code, phone_code_hash=sent_code.phone_code_hash
             )
-        except SessionPasswordNeeded:
+        except SessionPasswordNeededError:
             password: str = getpass("2FA password: ")
-            await client.check_password(password)
-        except PhoneCodeInvalid as err:
+            await client.sign_in(password=password)
+        except PhoneCodeInvalidError as err:
             raise _error("auth_failed", f"Invalid login code: {err}") from err
-        except PasswordHashInvalid as err:
+        except PasswordHashInvalidError as err:
             raise _error("auth_failed", f"Invalid 2FA password: {err}") from err
 
         me: Any = await client.get_me()
+        if me is None:
+            raise _error("auth_failed", "Login did not produce an authorized session")
         return _ok(
             "tg.auth.login",
             {
                 "authorized": True,
                 "session_file": str(config.session_file),
+                "profile": config.profile,
                 "user": normalize_user(me),
             },
-            {"session_file": str(config.session_file)},
+            {"session_file": str(config.session_file), "profile": config.profile},
         )
     finally:
-        await client.disconnect()
+        disconnect_result = client.disconnect()
+        if disconnect_result is not None:
+            await disconnect_result
 
 
 async def auth_logout(config: ResolvedTgConfig) -> CommandResult:
-    if config.session_file.exists():
-        config.session_file.unlink()
+    removed: bool = any(
+        candidate.exists()
+        for candidate in [
+            config.session_file,
+            Path(f"{config.session_file}-journal"),
+            Path(f"{config.session_file}-shm"),
+            Path(f"{config.session_file}-wal"),
+        ]
+    )
+    _remove_session_files(config)
     return _ok(
         "tg.auth.logout",
-        {"removed": True, "session_file": str(config.session_file)},
-        {"session_file": str(config.session_file)},
+        {"removed": removed, "session_file": str(config.session_file), "profile": config.profile},
+        {"session_file": str(config.session_file), "profile": config.profile},
     )
 
 
 async def resolve_peer(config: ResolvedTgConfig, peer: str) -> CommandResult:
     async with telegram_client(config) as client:
-        chat: Any = await client.get_chat(peer)
-        return _ok("tg.resolve", {"chat": normalize_chat(chat)}, {"peer": peer})
+        entity: Any = await client.get_entity(peer)
+        return _ok(
+            "tg.resolve",
+            {"chat": normalize_chat(entity)},
+            {"peer": peer, "profile": config.profile},
+        )
 
 
 async def dialogs(config: ResolvedTgConfig, limit: int) -> CommandResult:
     async with telegram_client(config) as client:
         items: list[dict[str, Any]] = []
-        async for dialog in client.get_dialogs(limit=limit):
+        async for dialog in client.iter_dialogs(limit=limit):
             items.append(normalize_dialog(dialog))
-        return _ok("tg.dialogs", {"items": items}, {"limit": limit})
+        return _ok("tg.dialogs", {"items": items}, {"limit": limit, "profile": config.profile})
 
 
 async def history(config: ResolvedTgConfig, peer: str, limit: int, offset_id: int) -> CommandResult:
     async with telegram_client(config) as client:
+        entity: Any = await client.get_entity(peer)
         items: list[dict[str, Any]] = []
-        async for message in client.get_chat_history(peer, limit=limit, offset_id=offset_id):
-            items.append(normalize_message(message))
+        async for message in client.iter_messages(entity, limit=limit, offset_id=offset_id):
+            items.append(normalize_message(message, chat_entity=entity))
         return _ok(
             "tg.history",
             {"items": items},
-            {"peer": peer, "limit": limit, "offset_id": offset_id},
+            {"peer": peer, "limit": limit, "offset_id": offset_id, "profile": config.profile},
         )
 
 
@@ -168,96 +240,103 @@ async def get_messages(
     config: ResolvedTgConfig, peer: str, message_ids: list[int]
 ) -> CommandResult:
     async with telegram_client(config) as client:
-        messages: Any = await client.get_messages(peer, message_ids)
+        entity: Any = await client.get_entity(peer)
+        messages: Any = await client.get_messages(entity, ids=message_ids)
         if isinstance(messages, list):
-            items: list[dict[str, Any]] = []
-            typed_messages: list[Any] = cast(list[Any], messages)
-            for item in typed_messages:
-                if item is not None:
-                    items.append(normalize_message(item))
+            items: list[dict[str, Any]] = [
+                normalize_message(message, chat_entity=entity) for message in messages if message
+            ]
         else:
-            items = [normalize_message(messages)] if messages is not None else []
-        return _ok("tg.get", {"items": items}, {"peer": peer, "message_ids": message_ids})
+            items = [normalize_message(messages, chat_entity=entity)] if messages else []
+        return _ok(
+            "tg.get",
+            {"items": items},
+            {"peer": peer, "message_ids": message_ids, "profile": config.profile},
+        )
 
 
 async def send_message(
-    config: ResolvedTgConfig,
-    peer: str,
-    text: str,
-    reply_to_message_id: int | None,
+    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None
 ) -> CommandResult:
     async with telegram_client(config) as client:
-        message: Any = await client.send_message(
-            peer, text, reply_to_message_id=reply_to_message_id
-        )
+        entity: Any = await client.get_entity(peer)
+        if reply_to_message_id is None:
+            message: Any = await client.send_message(entity, text)
+        else:
+            message = await client.send_message(entity, text, reply_to=reply_to_message_id)
         return _ok(
             "tg.send",
-            {"message": normalize_message(message)},
-            {"peer": peer, "reply_to_message_id": reply_to_message_id},
+            {"message": normalize_message(message, chat_entity=entity)},
+            {"peer": peer, "reply_to_message_id": reply_to_message_id, "profile": config.profile},
         )
 
 
 async def react(config: ResolvedTgConfig, peer: str, message_id: int, emoji: str) -> CommandResult:
-    async with telegram_client(config) as client:
-        await client.send_reaction(peer, message_id, emoji)
-        return _ok(
-            "tg.react",
-            {"success": True},
-            {"peer": peer, "message_id": message_id, "emoji": emoji},
-        )
+    raise _error(
+        "unsupported", f"Telegram reactions are not implemented yet for Telethon backend: {emoji}"
+    )
 
 
 async def search_messages(
     config: ResolvedTgConfig, peer: str, query: str, limit: int
 ) -> CommandResult:
     async with telegram_client(config) as client:
+        entity: Any = await client.get_entity(peer)
         items: list[dict[str, Any]] = []
-        async for message in client.search_messages(peer, query=query, limit=limit):
-            items.append(normalize_message(message))
+        async for message in client.iter_messages(entity, search=query, limit=limit):
+            items.append(normalize_message(message, chat_entity=entity))
         return _ok(
             "tg.search",
             {"items": items},
-            {"peer": peer, "query": query, "limit": limit},
+            {"peer": peer, "query": query, "limit": limit, "profile": config.profile},
         )
 
 
 async def media_info(config: ResolvedTgConfig, peer: str, message_id: int) -> CommandResult:
     async with telegram_client(config) as client:
-        message: Any = await client.get_messages(peer, message_id)
+        entity: Any = await client.get_entity(peer)
+        message: Any = await client.get_messages(entity, ids=message_id)
+        if not message:
+            raise _error("not_found", "Message not found")
         media: dict[str, Any] | None = normalize_media(message)
         if media is None:
             raise _error("not_found", "Message has no media")
         return _ok(
             "tg.media-info",
-            {"media": media, "message": normalize_message(message)},
-            {"peer": peer, "message_id": message_id},
+            {"media": media, "message": normalize_message(message, chat_entity=entity)},
+            {"peer": peer, "message_id": message_id, "profile": config.profile},
         )
 
 
 async def media_download(
-    config: ResolvedTgConfig,
-    peer: str,
-    message_id: int,
-    output_dir: str | None,
+    config: ResolvedTgConfig, peer: str, message_id: int, output_dir: str | None
 ) -> CommandResult:
     target_dir: Path = Path(output_dir).expanduser() if output_dir else config.download_dir
     target_dir.mkdir(parents=True, exist_ok=True)
 
     async with telegram_client(config) as client:
-        message: Any = await client.get_messages(peer, message_id)
+        entity: Any = await client.get_entity(peer)
+        message: Any = await client.get_messages(entity, ids=message_id)
+        if not message:
+            raise _error("not_found", "Message not found")
         media: dict[str, Any] | None = normalize_media(message)
         if media is None:
             raise _error("not_found", "Message has no media")
-        downloaded_any: Any = await client.download_media(message, file_name=str(target_dir))  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportCallIssue]
+        downloaded_any: Any = await client.download_media(message, file=str(target_dir))
         downloaded: str | None = downloaded_any if isinstance(downloaded_any, str) else None
         return _ok(
             "tg.media-download",
             {
                 "path": str(Path(downloaded).expanduser().resolve()) if downloaded else None,
                 "media": media,
-                "message": normalize_message(message),
+                "message": normalize_message(message, chat_entity=entity),
             },
-            {"peer": peer, "message_id": message_id, "output_dir": str(target_dir)},
+            {
+                "peer": peer,
+                "message_id": message_id,
+                "output_dir": str(target_dir),
+                "profile": config.profile,
+            },
         )
 
 
@@ -265,20 +344,30 @@ async def copy_message(
     config: ResolvedTgConfig, source_peer: str, message_id: int, target_peer: str
 ) -> CommandResult:
     async with telegram_client(config) as client:
-        message: Any = await client.copy_message(target_peer, source_peer, message_id)
+        source_entity: Any = await client.get_entity(source_peer)
+        target_entity: Any = await client.get_entity(target_peer)
+        message: Any = await client.forward_messages(target_entity, message_id, source_entity)
+        normalized: dict[str, Any]
+        if isinstance(message, list):
+            normalized = normalize_message(message[0], chat_entity=target_entity) if message else {}
+        else:
+            normalized = normalize_message(message, chat_entity=target_entity)
         return _ok(
             "tg.copy",
-            {"message": normalize_message(message)},
-            {"source_peer": source_peer, "message_id": message_id, "target_peer": target_peer},
+            {"message": normalized},
+            {
+                "source_peer": source_peer,
+                "message_id": message_id,
+                "target_peer": target_peer,
+                "profile": config.profile,
+            },
         )
 
 
 def run(coro: Any) -> CommandResult:
     try:
         return asyncio.run(coro)
-    except FloodWait as err:
+    except FloodWaitError as err:
         raise _error(
-            "rate_limited", f"Telegram FloodWait: retry after {err.value} seconds"
+            "rate_limited", f"Telegram FloodWait: retry after {err.seconds} seconds"
         ) from err
-    except PeerIdInvalid as err:
-        raise _error("not_found", f"Telegram peer not found: {err}") from err
