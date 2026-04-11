@@ -6,6 +6,7 @@ JSON-only CLI toolbox for:
 - `search` — web search via Parallel
 - `extract` — URL content extraction via Parallel
 - `vtt` — video to text via Supadata
+- `tg` — Telegram CLI via Kurigram
 
 ## Install
 
@@ -17,7 +18,7 @@ uv sync
 Run with:
 
 ```bash
-uv run assistant-tools --help
+uv run kit --help
 ```
 
 ## Secrets
@@ -41,10 +42,11 @@ All commands are JSON-only and write structured output to stdout.
 ## Examples
 
 ```bash
-uv run assistant-tools stt ./sample.m4a
-uv run assistant-tools search "parallel ai extract api"
-uv run assistant-tools extract https://docs.parallel.ai/getting-started/overview
-uv run assistant-tools vtt https://www.youtube.com/watch?v=dQw4w9WgXcQ
+uv run kit stt ./sample.m4a
+uv run kit search "parallel ai extract api"
+uv run kit extract https://docs.parallel.ai/getting-started/overview
+uv run kit vtt https://www.youtube.com/watch?v=dQw4w9WgXcQ
+uv run kit tg auth status
 ```
 
 ## Config example
@@ -76,4 +78,16 @@ lang = ""
 wait = true
 poll_interval_seconds = 1.0
 wait_timeout_seconds = 180.0
+
+[tg]
+api_id = 0
+api_hash = ""
+session_file = "~/.local/state/assistant-tools/tg/main.session"
+download_dir = "~/.local/state/assistant-tools/tg/downloads"
+cache_dir = "~/.local/state/assistant-tools/tg/cache"
+session_string = ""
+proxy = ""
+takeout = false
+sleep_threshold = 10
+hide_password = false
 ```

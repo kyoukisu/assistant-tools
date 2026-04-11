@@ -43,12 +43,27 @@ class VttConfig:
 
 
 @dataclass(slots=True)
+class TgConfig:
+    api_id: int = 0
+    api_hash: str = ""
+    session_file: str = "~/.local/state/assistant-tools/tg/main.session"
+    download_dir: str = "~/.local/state/assistant-tools/tg/downloads"
+    cache_dir: str = "~/.local/state/assistant-tools/tg/cache"
+    session_string: str = ""
+    proxy: str = ""
+    takeout: bool = False
+    sleep_threshold: int = 10
+    hide_password: bool = False
+
+
+@dataclass(slots=True)
 class AppConfig:
     network: NetworkConfig
     stt: SttConfig
     search: SearchConfig
     extract: ExtractConfig
     vtt: VttConfig
+    tg: TgConfig
 
 
 @dataclass(slots=True)

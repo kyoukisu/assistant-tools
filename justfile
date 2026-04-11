@@ -1,7 +1,7 @@
 set shell := ["bash", "-lc"]
 
 run *args:
-    uv run assistant-tools {{args}}
+    uv run kit {{args}}
 
 lint:
     uv run ruff check .

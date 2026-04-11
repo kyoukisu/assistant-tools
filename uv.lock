@@ -21,6 +21,8 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "kurigram" },
+    { name = "tgcrypto" },
 ]
 
 [package.dev-dependencies]
@@ -30,7 +32,11 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "httpx", specifier = ">=0.28.1" }]
+requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "kurigram", specifier = ">=2.2.19" },
+    { name = "tgcrypto", specifier = ">=1.2.5" },
+]
 
 [package.metadata.requires-dev]
 dev = [
@@ -94,6 +100,19 @@ wheels = [
 ]
 
 [[package]]
+name = "kurigram"
+version = "2.2.19"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyaes" },
+    { name = "pysocks" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/aa/3c/0c5469b66ea5ad887d7b877b08113726e6d67ef622442c8dd7adbcf9e352/kurigram-2.2.19.tar.gz", hash = "sha256:6d86a870834527e91c6308f8307796a985a437a39e8112e3bc7a649c6d1f7daa", size = 557685, upload-time = "2026-02-20T09:36:08.844Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/00/7b4354395f7adcbf862af968a989f45f690542c4f0b458dc4cc7c10d2a40/kurigram-2.2.19-py3-none-any.whl", hash = "sha256:fa255cfc1aaa4b9be9ed3120af612a460a3e1c78d872b6090717ea77ca31dbf8", size = 5494166, upload-time = "2026-02-20T09:36:07.095Z" },
+]
+
+[[package]]
 name = "nodeenv"
 version = "1.10.0"
 source = { registry = "https://pypi.org/simple" }
@@ -101,6 +120,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/24/bf/d1bda4f6168e0b2e9
 wheels = [
     { url = "https://files.pythonhosted.org/packages/88/b2/d0896bdcdc8d28a7fc5717c305f1a861c26e18c05047949fb371034d98bd/nodeenv-1.10.0-py2.py3-none-any.whl", hash = "sha256:5bb13e3eed2923615535339b3c620e76779af4cb4c6a90deccc9e36b274d3827", size = 23438, upload-time = "2025-12-20T14:08:52.782Z" },
 ]
+
+[[package]]
+name = "pyaes"
+version = "1.6.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/44/66/2c17bae31c906613795711fc78045c285048168919ace2220daa372c7d72/pyaes-1.6.1.tar.gz", hash = "sha256:02c1b1405c38d3c370b085fb952dd8bea3fadcee6411ad99f312cc129c536d8f", size = 28536, upload-time = "2017-09-20T21:17:54.23Z" }
 
 [[package]]
 name = "pyright"
@@ -113,6 +138,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/74/b2/5db700e52554b8f025faa9c3c624c59f1f6c8841ba81ab97641b54322f16/pyright-1.1.408.tar.gz", hash = "sha256:f28f2321f96852fa50b5829ea492f6adb0e6954568d1caa3f3af3a5f555eb684", size = 4400578, upload-time = "2026-01-08T08:07:38.795Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0c/82/a2c93e32800940d9573fb28c346772a14778b84ba7524e691b324620ab89/pyright-1.1.408-py3-none-any.whl", hash = "sha256:090b32865f4fdb1e0e6cd82bf5618480d48eecd2eb2e70f960982a3d9a4c17c1", size = 6399144, upload-time = "2026-01-08T08:07:37.082Z" },
+]
+
+[[package]]
+name = "pysocks"
+version = "1.7.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/11/293dd436aea955d45fc4e8a35b6ae7270f5b8e00b53cf6c024c83b657a11/PySocks-1.7.1.tar.gz", hash = "sha256:3f8804571ebe159c380ac6de37643bb4685970655d3bba243530d6558b799aa0", size = 284429, upload-time = "2019-09-20T02:07:35.714Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8d/59/b4572118e098ac8e46e399a1dd0f2d85403ce8bbaad9ec79373ed6badaf9/PySocks-1.7.1-py3-none-any.whl", hash = "sha256:2725bd0a9925919b9b51739eea5f9e2bae91e83288108a9ad338b2e3a4435ee5", size = 16725, upload-time = "2019-09-20T02:06:22.938Z" },
 ]
 
 [[package]]
@@ -138,6 +172,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/e4/46/602938f030adfa043e67112b73821024dc79f3ab4df5474c25fa4c1d2d14/ruff-0.15.10-py3-none-win32.whl", hash = "sha256:d4272e87e801e9a27a2e8df7b21011c909d9ddd82f4f3281d269b6ba19789ca5", size = 10588964, upload-time = "2026-04-09T14:06:07.14Z" },
     { url = "https://files.pythonhosted.org/packages/25/b6/261225b875d7a13b33a6d02508c39c28450b2041bb01d0f7f1a83d569512/ruff-0.15.10-py3-none-win_amd64.whl", hash = "sha256:28cb32d53203242d403d819fd6983152489b12e4a3ae44993543d6fe62ab42ed", size = 11745044, upload-time = "2026-04-09T14:05:39.473Z" },
     { url = "https://files.pythonhosted.org/packages/58/ed/dea90a65b7d9e69888890fb14c90d7f51bf0c1e82ad800aeb0160e4bacfd/ruff-0.15.10-py3-none-win_arm64.whl", hash = "sha256:601d1610a9e1f1c2165a4f561eeaa2e2ea1e97f3287c5aa258d3dab8b57c6188", size = 11035607, upload-time = "2026-04-09T14:05:47.593Z" },
+]
+
+[[package]]
+name = "tgcrypto"
+version = "1.2.5"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/59/7cf5ced989e3139a791d5452d58cb8994de589576b80f9267ba76d794f6c/TgCrypto-1.2.5.tar.gz", hash = "sha256:9bc2cac6fb9a12ef5b08f3dd500174fe374d89b660cce981f57e3138559cb682", size = 37280, upload-time = "2022-11-11T19:55:11.436Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/48/e6/07dc413e57f3677e0b887975b174d9cbc8170e92651dd35a784da9571d5f/TgCrypto-1.2.5-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:59597cdb1c87eb1184088563d20b42a8f2e431e9334fed64926079044ad2a4af", size = 58988, upload-time = "2022-11-11T19:51:41.686Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/fe/a418223ff6079184f50f5ad8c2dac37ec40adbb42b886c3ee44fdba2a540/TgCrypto-1.2.5-cp311-cp311-macosx_10_9_x86_64.whl", hash = "sha256:1283337ae75b02406dd700377b8b783e70033b548492517df6e6c4156b0ed69c", size = 43347, upload-time = "2022-11-11T19:51:43.662Z" },
+    { url = "https://files.pythonhosted.org/packages/39/0e/e861a9987c6d9d3ae04d156732311e018558f862490c466c369d73094807/TgCrypto-1.2.5-cp311-cp311-macosx_11_0_arm64.whl", hash = "sha256:1735437df0023a40e5fdd95e6b09ce806ec8f2cd2f8879023818840dfae60cab", size = 43123, upload-time = "2022-11-11T19:51:45.094Z" },
+    { url = "https://files.pythonhosted.org/packages/0d/ce/d60e249ac4d31d591f4c8ca76e7bd537f4c54f1947b400a14ac3a1678b09/TgCrypto-1.2.5-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:cfa17a20206532c6d2442c9d7a7f6434120bd75896ad9a3e9b9277477afa084f", size = 60713, upload-time = "2022-11-11T19:51:46.411Z" },
+    { url = "https://files.pythonhosted.org/packages/27/55/50f81b1a557bd8f9b73f7fcda2381f8826665858750968394ceec0b01282/TgCrypto-1.2.5-cp311-cp311-manylinux_2_5_i686.manylinux1_i686.manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:48da3674474839e5619e7430ff1f98aed9f55369f3cfaef7f65511852869572e", size = 60418, upload-time = "2022-11-11T19:51:47.872Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/55/7f5f5a024b71ef81b07c3fe15e79d03b634eb349b04bc79a62c8c3ed3376/TgCrypto-1.2.5-cp311-cp311-musllinux_1_1_i686.whl", hash = "sha256:b49e982e5b156be821a5235bd9102c00dc506a58607e2c8bd50ac872724a951f", size = 64397, upload-time = "2022-11-11T19:51:49.609Z" },
+    { url = "https://files.pythonhosted.org/packages/76/3e/8f059edce82de8ebbc1e513076c0f65a86fac95887fae21ae087440ef23a/TgCrypto-1.2.5-cp311-cp311-musllinux_1_1_x86_64.whl", hash = "sha256:9d9f13586065a6d86d05c16409054033a84be208acee29b49f6f194e27b08642", size = 64436, upload-time = "2022-11-11T19:51:51.414Z" },
+    { url = "https://files.pythonhosted.org/packages/eb/87/fe894eb7c4cce4b6f710223c24e0ca22f4107fe46f3f56091ceabd482de7/TgCrypto-1.2.5-cp311-cp311-win32.whl", hash = "sha256:10dd3870aecb1a783c6eafd3b164b2149dbc93a9ee13feb7e6f5c58f87c24cd0", size = 44723, upload-time = "2022-11-11T19:51:52.982Z" },
+    { url = "https://files.pythonhosted.org/packages/c1/fc/b918235b19b70a45f4a596c773fad2c379d941d2ac5005293e2ee18bdc63/TgCrypto-1.2.5-cp311-cp311-win_amd64.whl", hash = "sha256:a1beec47d6af8b509af7cf266e30f7703208076076594714005b42d2c25225b3", size = 45073, upload-time = "2022-11-11T19:51:54.724Z" },
 ]
 
 [[package]]

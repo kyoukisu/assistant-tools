@@ -11,6 +11,7 @@ from assistant_tools.models import ExtractConfig
 from assistant_tools.models import NetworkConfig
 from assistant_tools.models import SearchConfig
 from assistant_tools.models import SttConfig
+from assistant_tools.models import TgConfig
 from assistant_tools.models import VttConfig
 
 
@@ -39,6 +40,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     search_config: SearchConfig = SearchConfig(**_section(raw, "search"))
     extract_config: ExtractConfig = ExtractConfig(**_section(raw, "extract"))
     vtt_config: VttConfig = VttConfig(**_section(raw, "vtt"))
+    tg_config: TgConfig = TgConfig(**_section(raw, "tg"))
 
     return AppConfig(
         network=network_config,
@@ -46,6 +48,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         search=search_config,
         extract=extract_config,
         vtt=vtt_config,
+        tg=tg_config,
     )
 
 
