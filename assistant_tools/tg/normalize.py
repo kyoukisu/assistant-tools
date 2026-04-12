@@ -177,15 +177,19 @@ def normalize_message(
     username: str | None = getattr(chat, "username", None)
     message_id: int | None = getattr(message, "id", None)
     if not full:
+        # For history/get/search we keep full text by default.
+        # Truncation/excerpts should happen in higher-level renderers (e.g. Pi tools),
+        # or via explicit flags.
+        reply_to_message_id: int | None = getattr(
+            getattr(message, "reply_to", None), "reply_to_msg_id", None
+        )
         return {
             "message_id": message_id,
             "date": iso_datetime(getattr(message, "date", None)),
             "from": compact_user(sender),
             "text": getattr(message, "text", None),
             "media_type": _media_kind(message),
-            "reply_to_message_id": getattr(
-                getattr(message, "reply_to", None), "reply_to_msg_id", None
-            ),
+            "reply_to_message_id": reply_to_message_id,
         }
     return {
         "chat": normalize_chat(chat),

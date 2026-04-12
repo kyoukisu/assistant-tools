@@ -1,1 +1,1 @@
-"""Telegram tools built on Kurigram."""
+"""Telegram tools built on Telethon."""

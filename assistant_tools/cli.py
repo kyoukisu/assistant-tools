@@ -78,7 +78,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Return timestamped chunks instead of plain text",
     )
 
-    tg_parser = subparsers.add_parser("tg", help="Telegram CLI via Kurigram")
+    tg_parser = subparsers.add_parser("tg", help="Telegram CLI via Telethon")
     tg_parser.add_argument(
         "--profile",
         default=None,
