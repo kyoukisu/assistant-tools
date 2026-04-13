@@ -10,6 +10,7 @@ from assistant_tools.models import AppConfig
 from assistant_tools.models import CommandResult
 from assistant_tools.providers import groq as groq_provider
 from assistant_tools.providers import parallel as parallel_provider
+from assistant_tools.providers import deepinfra as deepinfra_provider
 from assistant_tools.providers import supadata as supadata_provider
 from assistant_tools.tg import commands as tg_commands
 from assistant_tools.tg.config import resolve_tg_config
@@ -153,6 +154,18 @@ def build_parser() -> argparse.ArgumentParser:
     tg_copy.add_argument("message_id", type=int, help="Source message id")
     tg_copy.add_argument("target_peer", help="Target peer")
     tg_copy.add_argument("--full", action="store_true", help="Return fuller copied message object")
+
+    tg_find_dialog = tg_subparsers.add_parser(
+        "find-dialog", help="Find dialog by title/username (DeepInfra embeddings)"
+    )
+    tg_find_dialog.add_argument("query", help="Query string")
+    tg_find_dialog.add_argument("--limit", type=int, default=400, help="Dialogs to scan")
+    tg_find_dialog.add_argument("--top", type=int, default=10, help="Top matches to return")
+    tg_find_dialog.add_argument(
+        "--model",
+        default="BAAI/bge-m3-multi",
+        help="DeepInfra embeddings model name",
+    )
 
     return parser
 
@@ -357,6 +370,18 @@ def dispatch(
                 )
         if args.tg_command == "resolve":
             return tg_commands.run(tg_commands.resolve_peer(tg_config, args.peer))
+        if args.tg_command == "find-dialog":
+            return tg_commands.run(
+                tg_commands.find_dialog(
+                    tg_config,
+                    query=str(args.query),
+                    limit=int(args.limit),
+                    top=int(args.top),
+                    model=str(args.model),
+                    timeout_seconds=float(config.network.timeout_seconds),
+                    proxy=(config.network.proxy or None),
+                )
+            )
         if args.tg_command == "dialogs":
             return tg_commands.run(tg_commands.dialogs(tg_config, args.limit, args.full))
         if args.tg_command == "participants":

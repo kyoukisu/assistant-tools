@@ -23,6 +23,8 @@ from assistant_tools.tg.normalize import normalize_dialog
 from assistant_tools.tg.normalize import normalize_media
 from assistant_tools.tg.normalize import normalize_message
 from assistant_tools.tg.normalize import normalize_user
+from assistant_tools.providers import deepinfra as deepinfra_provider
+from assistant_tools.utils import require_env
 from assistant_tools.utils import AssistantToolsError
 
 
@@ -326,6 +328,74 @@ async def search_messages(
             {"items": items},
             {"peer": peer, "query": query, "limit": limit, "profile": config.profile, "full": full},
         )
+
+
+def _dialog_text(chat: dict[str, Any]) -> str:
+    title: str = str(chat.get("title") or "").strip()
+    username: str = str(chat.get("username") or "").strip()
+    if username:
+        return f"{title} @{username}".strip()
+    return title
+
+
+def _cosine_topk(query_vec: list[float], doc_vecs: list[list[float]], k: int) -> list[int]:
+    import math
+
+    qn: float = math.sqrt(sum(x * x for x in query_vec)) + 1e-12
+    q: list[float] = [x / qn for x in query_vec]
+
+    scores: list[tuple[float, int]] = []
+    for i, v in enumerate(doc_vecs):
+        vn: float = math.sqrt(sum(x * x for x in v)) + 1e-12
+        dot: float = 0.0
+        for a, b in zip(q, v, strict=False):
+            dot += a * (b / vn)
+        scores.append((dot, i))
+    scores.sort(key=lambda t: t[0], reverse=True)
+    return [i for _, i in scores[:k]]
+
+
+async def find_dialog(
+    config: ResolvedTgConfig,
+    *,
+    query: str,
+    limit: int,
+    top: int,
+    model: str,
+    timeout_seconds: float,
+    proxy: str | None,
+) -> CommandResult:
+    # Pull dialogs via Telethon, normalize to compact chat objects.
+    async with telegram_client(config) as client:
+        items: list[dict[str, Any]] = []
+        async for dialog in client.iter_dialogs(limit=limit):
+            items.append(normalize_dialog(dialog, full=False))
+
+    chats: list[dict[str, Any]] = [it.get("chat") or {} for it in items]
+    texts: list[str] = [_dialog_text(c) for c in chats]
+
+    api_key: str = require_env("DEEPINFRA_TOKEN")
+    vecs: list[list[float]] = deepinfra_provider.embeddings(
+        api_key=api_key,
+        model=model,
+        inputs=[query, *texts],
+        timeout_seconds=timeout_seconds,
+        proxy=proxy,
+    )
+    query_vec: list[float] = vecs[0]
+    doc_vecs: list[list[float]] = vecs[1:]
+    idxs: list[int] = _cosine_topk(query_vec, doc_vecs, k=top)
+
+    matches: list[dict[str, Any]] = []
+    for rank, i in enumerate(idxs, start=1):
+        chat: dict[str, Any] = chats[i]
+        matches.append({"rank": rank, "chat": chat})
+
+    return _ok(
+        "tg.find-dialog",
+        {"matches": matches},
+        {"query": query, "limit": limit, "top": top, "model": model, "profile": config.profile},
+    )
 
 
 async def media_info(

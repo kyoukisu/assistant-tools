@@ -45,6 +45,10 @@ Optional:
 
 - `TELEGRAM_SESSION_STRING`
 
+DeepInfra (optional):
+
+- `DEEPINFRA_TOKEN`
+
 ## Config
 
 Default config path:
@@ -135,6 +139,7 @@ kit tg --profile work auth status
 ### Telegram reading
 
 ```bash
+kit tg find-dialog "дд джун" --limit 400 --top 10
 kit tg dialogs --limit 20
 kit tg resolve me
 kit tg resolve username
