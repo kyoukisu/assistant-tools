@@ -7,7 +7,10 @@ requires-python = ">=3.11"
 dependencies = [
   "cryptg>=0.5.2",
   "httpx>=0.28.1",
+  "kittentts @ git+https://github.com/KittenML/KittenTTS@395171a68d5c73a50027436988fb856c30c748b8",
   "python-socks[asyncio]>=2.8.1",
+  "soundfile>=0.13.1",
+  "socksio>=1.0.0",
   "telethon>=1.43.0",
 ]
 

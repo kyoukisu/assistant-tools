@@ -13,6 +13,7 @@ from assistant_tools.models import SearchConfig
 from assistant_tools.models import SttConfig
 from assistant_tools.models import TgConfig
 from assistant_tools.models import TgProfileConfig
+from assistant_tools.models import TtsConfig
 from assistant_tools.models import VttConfig
 
 
@@ -41,6 +42,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     search_config: SearchConfig = SearchConfig(**_section(raw, "search"))
     extract_config: ExtractConfig = ExtractConfig(**_section(raw, "extract"))
     vtt_config: VttConfig = VttConfig(**_section(raw, "vtt"))
+    tts_config: TtsConfig = TtsConfig(**_section(raw, "tts"))
     tg_section: dict[str, Any] = _section(raw, "tg")
     raw_profiles: Any = tg_section.pop("profiles", {})
     profile_map: dict[str, TgProfileConfig] = {}
@@ -66,6 +68,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         search=search_config,
         extract=extract_config,
         vtt=vtt_config,
+        tts=tts_config,
         tg=tg_config,
     )
 

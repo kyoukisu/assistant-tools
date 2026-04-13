@@ -46,6 +46,18 @@ class VttConfig:
 
 
 @dataclass(slots=True)
+class TtsConfig:
+    model: str = "KittenML/kitten-tts-micro-0.8"
+    voice: str = "Rosie"
+    backend: str = "cpu"
+    speed: float = 1.0
+    clean_text: bool = False
+    autoplay: bool = True
+    volume: int = 45000
+    output_dir: str = "~/.local/state/assistant-tools/tts"
+
+
+@dataclass(slots=True)
 class TgProfileConfig:
     api_id: int = 0
     api_hash: str = ""
@@ -82,6 +94,7 @@ class AppConfig:
     search: SearchConfig
     extract: ExtractConfig
     vtt: VttConfig
+    tts: TtsConfig
     tg: TgConfig
 
 

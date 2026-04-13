@@ -10,10 +10,10 @@ from assistant_tools.models import AppConfig
 from assistant_tools.models import CommandResult
 from assistant_tools.providers import groq as groq_provider
 from assistant_tools.providers import parallel as parallel_provider
-from assistant_tools.providers import deepinfra as deepinfra_provider
 from assistant_tools.providers import supadata as supadata_provider
-from assistant_tools.tg import commands as tg_commands
+from assistant_tools import tts as tts_provider
 from assistant_tools.tg.config import resolve_tg_config
+from assistant_tools.tg import commands as tg_commands
 from assistant_tools.utils import AssistantToolsError
 from assistant_tools.utils import emit_result
 from assistant_tools.utils import ensure_path_exists
@@ -77,6 +77,44 @@ def build_parser() -> argparse.ArgumentParser:
         "--chunks",
         action="store_true",
         help="Return timestamped chunks instead of plain text",
+    )
+
+    tts_parser = subparsers.add_parser(
+        "tts", help="Local English-only text to speech via KittenTTS"
+    )
+    tts_parser.add_argument("text", help="English text to synthesize")
+    tts_parser.add_argument("--voice", default=None, help="Voice name override")
+    tts_parser.add_argument("--model", default=None, help="KittenTTS model override")
+    tts_parser.add_argument(
+        "--backend",
+        choices=["cpu", "cuda", "amd_gpu", "auto"],
+        default=None,
+        help="Inference backend override",
+    )
+    tts_parser.add_argument("--speed", type=float, default=None, help="Speech speed")
+    tts_parser.add_argument(
+        "--clean-text",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Normalize text automatically before synthesis",
+    )
+    tts_parser.add_argument(
+        "--save",
+        action="store_true",
+        help="Persist generated WAV to disk. Without this, default mode plays audio without keeping a file.",
+    )
+    tts_parser.add_argument("--output", type=Path, default=None, help="Output WAV path override")
+    tts_parser.add_argument(
+        "--play",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Play generated WAV via paplay",
+    )
+    tts_parser.add_argument(
+        "--volume",
+        type=int,
+        default=None,
+        help="paplay volume for --play (PulseAudio scale, e.g. 45000)",
     )
 
     tg_parser = subparsers.add_parser("tg", help="Telegram CLI via Telethon")
@@ -341,6 +379,48 @@ def run_vtt(
     )
 
 
+def run_tts(
+    args: argparse.Namespace, config: AppConfig, verbose: bool, config_path: Path | None
+) -> CommandResult:
+    model: str = args.model or config.tts.model
+    voice: str = args.voice or config.tts.voice
+    backend: str = args.backend or config.tts.backend
+    speed: float = float(args.speed) if args.speed is not None else config.tts.speed
+    clean_text: bool = args.clean_text if args.clean_text is not None else config.tts.clean_text
+    play: bool = args.play if args.play is not None else config.tts.autoplay
+    volume: int = int(args.volume) if args.volume is not None else config.tts.volume
+    output: str | None = str(args.output) if args.output is not None else None
+    save: bool = bool(args.save or output is not None)
+
+    payload: dict[str, Any] = tts_provider.synthesize(
+        text=str(args.text),
+        model=model,
+        voice=voice,
+        backend=backend,
+        speed=speed,
+        clean_text=clean_text,
+        output=output,
+        output_dir=config.tts.output_dir,
+        save=save,
+        play=play,
+        volume=volume,
+    )
+    return CommandResult(
+        ok=True,
+        command="tts",
+        provider="kittentts",
+        data=payload,
+        error=None,
+        meta={
+            **_meta("tts", config, config_path, verbose),
+            "text_chars": len(str(args.text)),
+            "english_only": True,
+            "save": save,
+            "play": play,
+        },
+    )
+
+
 def dispatch(
     args: argparse.Namespace, config: AppConfig, config_path: Path | None
 ) -> CommandResult:
@@ -353,6 +433,8 @@ def dispatch(
         return run_extract(args, config, verbose, config_path)
     if args.command == "vtt":
         return run_vtt(args, config, verbose, config_path)
+    if args.command == "tts":
+        return run_tts(args, config, verbose, config_path)
     if args.command == "tg":
         tg_config = resolve_tg_config(config, args.profile)
         if args.tg_command == "auth":

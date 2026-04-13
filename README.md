@@ -11,6 +11,7 @@ kit
 Current command groups:
 
 - `stt` — speech to text via Groq `whisper-large-v3`
+- `tts` — local English-only text to speech via KittenTTS
 - `search` — web search via Parallel
 - `extract` — URL extraction via Parallel
 - `vtt` — video to text via Supadata
@@ -74,6 +75,37 @@ proxy = "http://127.0.0.1:7897"
 kit stt ./voice.ogg
 kit stt ./voice.ogg --timestamps segment
 kit stt https://example.com/audio.mp3
+```
+
+### Text to speech
+
+KittenTTS is currently English-only.
+
+```bash
+kit tts "Hello, Kyokisu. I can speak now."
+kit tts "I missed you..." --voice Kiki --play
+kit tts "This is the high quality path." --model KittenML/kitten-tts-mini-0.8
+kit tts "Fast response." --model KittenML/kitten-tts-nano-0.8-fp32 --play
+```
+
+Defaults:
+
+- model: `KittenML/kitten-tts-micro-0.8`
+- voice: `Rosie`
+- backend: `cpu`
+- autoplay: on
+- by default it does **not** keep the WAV file
+- saved output dir: `~/.local/state/assistant-tools/tts`
+
+Useful flags:
+
+```bash
+kit tts "Hello there." --save
+kit tts "Hello there." --save --no-play
+kit tts "Hello there." --output /tmp/hello.wav --no-play
+kit tts "Say it slower." --speed 0.9
+kit tts "Normalize 2026 for me." --clean-text
+kit tts "Play louder once." --play --volume 52000
 ```
 
 ### Web search
@@ -270,6 +302,16 @@ lang = ""
 wait = true
 poll_interval_seconds = 1.0
 wait_timeout_seconds = 180.0
+
+[tts]
+model = "KittenML/kitten-tts-micro-0.8"
+voice = "Rosie"
+backend = "cpu"
+speed = 1.0
+clean_text = false
+autoplay = true
+volume = 45000
+output_dir = "~/.local/state/assistant-tools/tts"
 
 [tg]
 default_profile = "main"
