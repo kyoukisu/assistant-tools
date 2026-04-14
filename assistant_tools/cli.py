@@ -163,6 +163,26 @@ def build_parser() -> argparse.ArgumentParser:
     tg_send.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
     tg_send.add_argument("--full", action="store_true", help="Return fuller sent message object")
 
+    tg_send_file = tg_subparsers.add_parser("send-file", help="Send local file as document")
+    tg_send_file.add_argument("peer", help="Target peer")
+    tg_send_file.add_argument("path", help="Local file path")
+    tg_send_file.add_argument("--caption", default=None, help="Optional caption")
+    tg_send_file.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send_file.add_argument(
+        "--full", action="store_true", help="Return fuller sent message object"
+    )
+
+    tg_send_voice = tg_subparsers.add_parser(
+        "send-voice", help="Send local audio file as Telegram voice note"
+    )
+    tg_send_voice.add_argument("peer", help="Target peer")
+    tg_send_voice.add_argument("path", help="Local audio file path")
+    tg_send_voice.add_argument("--caption", default=None, help="Optional caption")
+    tg_send_voice.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send_voice.add_argument(
+        "--full", action="store_true", help="Return fuller sent message object"
+    )
+
     tg_react = tg_subparsers.add_parser("react", help="React to a message")
     tg_react.add_argument("peer", help="Target peer")
     tg_react.add_argument("message_id", type=int, help="Target message id")
@@ -479,6 +499,18 @@ def dispatch(
         if args.tg_command == "send":
             return tg_commands.run(
                 tg_commands.send_message(tg_config, args.peer, args.text, args.reply_to, args.full)
+            )
+        if args.tg_command == "send-file":
+            return tg_commands.run(
+                tg_commands.send_file(
+                    tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
+                )
+            )
+        if args.tg_command == "send-voice":
+            return tg_commands.run(
+                tg_commands.send_voice(
+                    tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
+                )
             )
         if args.tg_command == "react":
             return tg_commands.run(

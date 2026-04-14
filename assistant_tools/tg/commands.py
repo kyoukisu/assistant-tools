@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from getpass import getpass
 from pathlib import Path
+import subprocess
+import tempfile
 from typing import Any
 
 from telethon import TelegramClient
@@ -41,6 +43,56 @@ def _ok(command: str, data: dict[str, Any], meta: dict[str, Any]) -> CommandResu
 
 def _error(code: str, message: str, *, exit_code: int = 1) -> AssistantToolsError:
     return AssistantToolsError(message, error_type=code, exit_code=exit_code)
+
+
+def _ensure_local_file(path_value: str) -> Path:
+    path: Path = Path(path_value).expanduser()
+    if not path.exists():
+        raise _error("missing_file", f"Input file does not exist: {path}", exit_code=2)
+    if not path.is_file():
+        raise _error("invalid_file", f"Input path is not a file: {path}", exit_code=2)
+    return path.resolve()
+
+
+def _voice_upload_path(path: Path) -> tuple[Path, bool]:
+    suffix: str = path.suffix.lower()
+    if suffix in {".ogg", ".opus"}:
+        return path, False
+
+    tmp = tempfile.NamedTemporaryFile(prefix="assistant-tools-voice-", suffix=".ogg", delete=False)
+    tmp_path: Path = Path(tmp.name)
+    tmp.close()
+    command: list[str] = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        str(path),
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "48000",
+        "-c:a",
+        "libopus",
+        "-b:a",
+        "48k",
+        "-application",
+        "voip",
+        str(tmp_path),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except FileNotFoundError as err:
+        tmp_path.unlink(missing_ok=True)
+        raise _error("missing_runtime", "ffmpeg is not available in PATH", exit_code=5) from err
+    except subprocess.CalledProcessError as err:
+        tmp_path.unlink(missing_ok=True)
+        stderr: str = (err.stderr or "").strip()
+        detail: str = f": {stderr}" if stderr else ""
+        raise _error(
+            "voice_convert_failed", f"ffmpeg voice conversion failed{detail}", exit_code=5
+        ) from err
+    return tmp_path, True
 
 
 def _is_incompatible_session_error(err: Exception) -> bool:
@@ -307,6 +359,87 @@ async def send_message(
                 "full": full,
             },
         )
+
+
+async def send_file(
+    config: ResolvedTgConfig,
+    peer: str,
+    path_value: str,
+    caption: str | None,
+    reply_to_message_id: int | None,
+    full: bool,
+) -> CommandResult:
+    input_path: Path = _ensure_local_file(path_value)
+    async with telegram_client(config) as client:
+        entity: Any = await client.get_entity(peer)
+        message: Any = await client.send_file(
+            entity,
+            str(input_path),
+            caption=caption,
+            reply_to=reply_to_message_id,
+            force_document=True,
+        )
+        return _ok(
+            "tg.send-file",
+            {
+                "path": str(input_path),
+                "message": normalize_message(message, chat_entity=entity, full=full),
+            },
+            {
+                "peer": peer,
+                "path": str(input_path),
+                "caption": caption,
+                "reply_to_message_id": reply_to_message_id,
+                "profile": config.profile,
+                "full": full,
+            },
+        )
+
+
+async def send_voice(
+    config: ResolvedTgConfig,
+    peer: str,
+    path_value: str,
+    caption: str | None,
+    reply_to_message_id: int | None,
+    full: bool,
+) -> CommandResult:
+    input_path: Path = _ensure_local_file(path_value)
+    upload_path: Path
+    converted: bool
+    upload_path, converted = _voice_upload_path(input_path)
+    try:
+        async with telegram_client(config) as client:
+            entity: Any = await client.get_entity(peer)
+            message: Any = await client.send_file(
+                entity,
+                str(upload_path),
+                caption=caption,
+                reply_to=reply_to_message_id,
+                voice_note=True,
+                mime_type="audio/ogg",
+            )
+            return _ok(
+                "tg.send-voice",
+                {
+                    "input_path": str(input_path),
+                    "upload_path": str(upload_path),
+                    "converted": converted,
+                    "message": normalize_message(message, chat_entity=entity, full=full),
+                },
+                {
+                    "peer": peer,
+                    "path": str(input_path),
+                    "caption": caption,
+                    "reply_to_message_id": reply_to_message_id,
+                    "profile": config.profile,
+                    "full": full,
+                    "converted": converted,
+                },
+            )
+    finally:
+        if converted:
+            upload_path.unlink(missing_ok=True)
 
 
 async def react(config: ResolvedTgConfig, peer: str, message_id: int, emoji: str) -> CommandResult:

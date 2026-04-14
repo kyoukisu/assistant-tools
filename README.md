@@ -185,9 +185,19 @@ kit tg search me "hello" --limit 20
 ```bash
 kit tg send me "hello"
 kit tg send me "reply text" --reply-to 123
+kit tg send-file me /tmp/doc.pdf
+kit tg send-file me /tmp/image.png --caption "see this"
+kit tg send-voice me /tmp/voice.ogg
+kit tg send-voice me /tmp/hello.wav
 kit tg react me 123 "🔥"
 kit tg copy me 123 another_chat
 ```
+
+Notes:
+
+- `send-file` sends a local file as a document.
+- `send-voice` sends a local audio file as a Telegram voice note.
+- If `send-voice` gets a non-ogg/non-opus file such as WAV, it auto-converts it to OGG/Opus with `ffmpeg` before upload.
 
 ### Telegram media
 
