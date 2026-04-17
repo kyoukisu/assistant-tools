@@ -50,7 +50,7 @@ def _load_dependencies() -> tuple[Any, Any]:
         KittenTTS: Any = getattr(kittentts_module, "KittenTTS")
     except ImportError as err:
         raise AssistantToolsError(
-            "Missing Python dependency: kittentts. Run: cd /home/user/assistant-tools && uv sync",
+            "Missing Python dependency: kittentts. Reinstall assistant-tools with the kitten-tts extra, for example: uv tool install 'assistant-tools[kitten-tts] @ git+https://github.com/kyoukisu/assistant-tools'",
             error_type="missing_dependency",
             exit_code=4,
         ) from err
@@ -59,7 +59,7 @@ def _load_dependencies() -> tuple[Any, Any]:
         sf: Any = importlib.import_module("soundfile")
     except ImportError as err:
         raise AssistantToolsError(
-            "Missing Python dependency: soundfile. Run: cd /home/user/assistant-tools && uv sync",
+            "Missing Python dependency: soundfile. Reinstall assistant-tools so runtime dependencies are present.",
             error_type="missing_dependency",
             exit_code=4,
         ) from err

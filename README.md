@@ -43,6 +43,20 @@ kit --version
 kit --help
 ```
 
+## TTS add-on
+
+The core package is now publishable-friendly. The `tts` command still depends on upstream KittenTTS, which upstream currently distributes via a release wheel URL rather than a normal package index flow.
+
+If you want `tts`, install the package with its `kitten-tts` extra:
+
+```bash
+uv tool install 'assistant-tools[kitten-tts] @ git+https://github.com/kyoukisu/assistant-tools'
+```
+
+This extra increases the installed tool environment from about `82MB` to about `7.2GB` (roughly `+7.1GB`).
+
+If you do not install that extra dependency, every non-TTS command still works, and `tts` fails with a direct JSON error telling you what is missing.
+
 ## Secrets
 
 These are expected via environment variables:
