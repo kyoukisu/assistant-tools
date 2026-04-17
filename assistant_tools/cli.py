@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Any
 
+from assistant_tools import __version__
 from assistant_tools.config import config_snapshot
 from assistant_tools.config import load_config
 from assistant_tools.models import AppConfig
@@ -24,6 +25,9 @@ from assistant_tools.utils import require_env
 
 def build_parser() -> argparse.ArgumentParser:
     parser: argparse.ArgumentParser = argparse.ArgumentParser(prog="kit")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     parser.add_argument("--config", type=Path, default=None, help="Path to config TOML file")
     parser.add_argument("--verbose", action="store_true", help="Include config snapshot in meta")
 

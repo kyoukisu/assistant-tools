@@ -22,14 +22,25 @@ All command results go to stdout as JSON.
 ## Install
 
 ```bash
-cd /home/user/assistant-tools
-uv sync
+uv tool install git+https://github.com/kyoukisu/assistant-tools
 ```
 
-Run:
+That installs these commands:
+
+- `kit`
+- `assistant-tools`
+
+Upgrade later with:
 
 ```bash
-uv run kit --help
+uv tool upgrade assistant-tools
+```
+
+Check the install:
+
+```bash
+kit --version
+kit --help
 ```
 
 ## Secrets
