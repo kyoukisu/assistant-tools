@@ -117,7 +117,6 @@ Defaults:
 
 - model: `KittenML/kitten-tts-micro-0.8`
 - voice: `Rosie`
-- backend: `cpu`
 - autoplay: on
 - by default it does **not** keep the WAV file
 - saved output dir: `~/.local/state/assistant-tools/tts`
@@ -211,9 +210,10 @@ kit tg search me "hello" --limit 20
 kit tg send me "hello"
 kit tg send me "reply text" --reply-to 123
 kit tg send-file me /tmp/doc.pdf
-kit tg send-file me /tmp/image.png --caption "see this"
+kit tg send-photo me /tmp/image.png --caption "see this"
 kit tg send-voice me /tmp/voice.ogg
 kit tg send-voice me /tmp/hello.wav
+kit tg wait-next me --timeout-seconds 30
 kit tg react me 123 "🔥"
 kit tg copy me 123 another_chat
 ```
@@ -221,7 +221,9 @@ kit tg copy me 123 another_chat
 Notes:
 
 - `send-file` sends a local file as a document.
+- `send-photo` sends a local image as a Telegram photo.
 - `send-voice` sends a local audio file as a Telegram voice note.
+- `wait-next` waits for the next incoming message in the target chat and requires `--timeout-seconds`.
 - If `send-voice` gets a non-ogg/non-opus file such as WAV, it auto-converts it to OGG/Opus with `ffmpeg` before upload.
 
 ### Telegram media
@@ -341,7 +343,6 @@ wait_timeout_seconds = 180.0
 [tts]
 model = "KittenML/kitten-tts-micro-0.8"
 voice = "Rosie"
-backend = "cpu"
 speed = 1.0
 clean_text = false
 autoplay = true

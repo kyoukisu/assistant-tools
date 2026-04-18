@@ -42,7 +42,9 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     search_config: SearchConfig = SearchConfig(**_section(raw, "search"))
     extract_config: ExtractConfig = ExtractConfig(**_section(raw, "extract"))
     vtt_config: VttConfig = VttConfig(**_section(raw, "vtt"))
-    tts_config: TtsConfig = TtsConfig(**_section(raw, "tts"))
+    tts_section: dict[str, Any] = _section(raw, "tts")
+    tts_section.pop("backend", None)
+    tts_config: TtsConfig = TtsConfig(**tts_section)
     tg_section: dict[str, Any] = _section(raw, "tg")
     raw_profiles: Any = tg_section.pop("profiles", {})
     profile_map: dict[str, TgProfileConfig] = {}

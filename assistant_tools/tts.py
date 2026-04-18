@@ -67,7 +67,7 @@ def _load_dependencies() -> tuple[Any, Any]:
     return KittenTTS, sf
 
 
-def _load_model(KittenTTS: Any, model: str, backend: str) -> Any:
+def _load_model(KittenTTS: Any, model: str) -> Any:
     try:
         return KittenTTS(model)
     except Exception as err:
@@ -83,7 +83,6 @@ def synthesize(
     text: str,
     model: str,
     voice: str,
-    backend: str,
     speed: float,
     clean_text: bool,
     output: str | None,
@@ -95,7 +94,7 @@ def synthesize(
     _ensure_english_text(text)
 
     KittenTTS, sf = _load_dependencies()
-    model_instance: Any = _load_model(KittenTTS, model, backend)
+    model_instance: Any = _load_model(KittenTTS, model)
 
     try:
         audio: Any = model_instance.generate(text, voice=voice, speed=speed, clean_text=clean_text)
@@ -155,7 +154,6 @@ def synthesize(
         "duration_seconds": duration_seconds,
         "voice": voice,
         "model": model,
-        "backend": backend,
         "speed": speed,
         "clean_text": clean_text,
         "saved": persisted,

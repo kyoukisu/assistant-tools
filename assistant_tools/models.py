@@ -49,7 +49,6 @@ class VttConfig:
 class TtsConfig:
     model: str = "KittenML/kitten-tts-micro-0.8"
     voice: str = "Rosie"
-    backend: str = "cpu"
     speed: float = 1.0
     clean_text: bool = False
     autoplay: bool = True

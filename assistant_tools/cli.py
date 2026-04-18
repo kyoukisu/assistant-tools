@@ -89,12 +89,6 @@ def build_parser() -> argparse.ArgumentParser:
     tts_parser.add_argument("text", help="English text to synthesize")
     tts_parser.add_argument("--voice", default=None, help="Voice name override")
     tts_parser.add_argument("--model", default=None, help="KittenTTS model override")
-    tts_parser.add_argument(
-        "--backend",
-        choices=["cpu", "cuda", "amd_gpu", "auto"],
-        default=None,
-        help="Inference backend override",
-    )
     tts_parser.add_argument("--speed", type=float, default=None, help="Speech speed")
     tts_parser.add_argument(
         "--clean-text",
@@ -427,7 +421,6 @@ def run_tts(
 ) -> CommandResult:
     model: str = args.model or config.tts.model
     voice: str = args.voice or config.tts.voice
-    backend: str = args.backend or config.tts.backend
     speed: float = float(args.speed) if args.speed is not None else config.tts.speed
     clean_text: bool = args.clean_text if args.clean_text is not None else config.tts.clean_text
     play: bool = args.play if args.play is not None else config.tts.autoplay
@@ -439,7 +432,6 @@ def run_tts(
         text=str(args.text),
         model=model,
         voice=voice,
-        backend=backend,
         speed=speed,
         clean_text=clean_text,
         output=output,
