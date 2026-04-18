@@ -67,6 +67,24 @@ def _load_dependencies() -> tuple[Any, Any]:
     return KittenTTS, sf
 
 
+def _load_model(KittenTTS: Any, model: str, backend: str) -> Any:
+    if backend != "auto":
+        raise AssistantToolsError(
+            "Installed KittenTTS does not support backend selection; use backend='auto' or upgrade kittentts.",
+            error_type="unsupported_option",
+            exit_code=2,
+        )
+
+    try:
+        return KittenTTS(model)
+    except Exception as err:
+        raise AssistantToolsError(
+            f"Failed to load KittenTTS model '{model}': {err}",
+            error_type="tts_model_error",
+            exit_code=4,
+        ) from err
+
+
 def synthesize(
     *,
     text: str,
@@ -84,16 +102,7 @@ def synthesize(
     _ensure_english_text(text)
 
     KittenTTS, sf = _load_dependencies()
-    requested_backend: str | None = None if backend == "auto" else backend
-
-    try:
-        model_instance: Any = KittenTTS(model, backend=requested_backend)
-    except Exception as err:
-        raise AssistantToolsError(
-            f"Failed to load KittenTTS model '{model}': {err}",
-            error_type="tts_model_error",
-            exit_code=4,
-        ) from err
+    model_instance: Any = _load_model(KittenTTS, model, backend)
 
     try:
         audio: Any = model_instance.generate(text, voice=voice, speed=speed, clean_text=clean_text)
