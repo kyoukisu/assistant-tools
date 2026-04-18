@@ -22,15 +22,40 @@ All command results go to stdout as JSON.
 ## Install
 
 ```bash
-cd /home/user/assistant-tools
-uv sync
+uv tool install git+https://github.com/kyoukisu/assistant-tools
 ```
 
-Run:
+That installs these commands:
+
+- `kit`
+- `assistant-tools`
+
+Upgrade later with:
 
 ```bash
-uv run kit --help
+uv tool upgrade assistant-tools
 ```
+
+Check the install:
+
+```bash
+kit --version
+kit --help
+```
+
+## TTS add-on
+
+The core package is now publishable-friendly. The `tts` command still depends on upstream KittenTTS, which upstream currently distributes via a release wheel URL rather than a normal package index flow.
+
+If you want `tts`, install the package with its `kitten-tts` extra:
+
+```bash
+uv tool install 'assistant-tools[kitten-tts] @ git+https://github.com/kyoukisu/assistant-tools'
+```
+
+This extra increases the installed tool environment from about `82MB` to about `7.2GB` (roughly `+7.1GB`).
+
+If you do not install that extra dependency, every non-TTS command still works, and `tts` fails with a direct JSON error telling you what is missing.
 
 ## Secrets
 
