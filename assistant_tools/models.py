@@ -57,6 +57,17 @@ class TtsConfig:
 
 
 @dataclass(slots=True)
+class VideoConfig:
+    output_dir: str = "~/.local/state/assistant-tools/video"
+    max_frames: int = 30
+    seconds_per_frame: float = 2.0
+    frame_format: str = "jpg"
+    align_to_segments: bool = True
+    transcribe: bool = True
+    timestamps: str = "segment"
+
+
+@dataclass(slots=True)
 class TgProfileConfig:
     api_id: int = 0
     api_hash: str = ""
@@ -94,6 +105,7 @@ class AppConfig:
     extract: ExtractConfig
     vtt: VttConfig
     tts: TtsConfig
+    video: VideoConfig
     tg: TgConfig
 
 

@@ -13,6 +13,7 @@ from assistant_tools.providers import groq as groq_provider
 from assistant_tools.providers import parallel as parallel_provider
 from assistant_tools.providers import supadata as supadata_provider
 from assistant_tools import tts as tts_provider
+from assistant_tools import video as video_provider
 from assistant_tools.tg.config import resolve_tg_config
 from assistant_tools.tg import commands as tg_commands
 from assistant_tools.utils import AssistantToolsError
@@ -82,6 +83,54 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Return timestamped chunks instead of plain text",
     )
+
+    video_parser = subparsers.add_parser(
+        "video", help="Extract evenly spread frames and optional audio transcript from a local video"
+    )
+    video_parser.add_argument("input", help="Local video or GIF path")
+    video_parser.add_argument("--output-dir", type=Path, default=None, help="Run output directory root")
+    video_parser.add_argument("--max-frames", type=int, default=None, help="Maximum frames to extract")
+    video_parser.add_argument(
+        "--seconds-per-frame",
+        type=float,
+        default=None,
+        help="Target spacing budget before max frame cap applies",
+    )
+    video_parser.add_argument(
+        "--frame-format",
+        choices=["jpg", "png", "webp"],
+        default=None,
+        help="Image format for extracted frames",
+    )
+    video_parser.add_argument(
+        "--align-to-segments",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Nudge frame timestamps toward speech segment midpoints when available",
+    )
+    video_parser.add_argument(
+        "--transcribe",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Extract audio and run Groq STT when audio exists",
+    )
+    video_parser.add_argument(
+        "--timestamps",
+        choices=["none", "segment", "word"],
+        default=None,
+        help="Timestamp granularity for the transcript payload",
+    )
+    video_parser.add_argument(
+        "--at",
+        dest="at_seconds",
+        action="append",
+        type=float,
+        default=None,
+        help="Extract frame(s) at explicit second offsets. Repeatable. When provided, overrides auto spreading.",
+    )
+    video_parser.add_argument("--language", default=None, help="Language code override")
+    video_parser.add_argument("--model", default=None, help="Groq model override")
+    video_parser.add_argument("--prompt", default=None, help="Optional spelling/context prompt")
 
     tts_parser = subparsers.add_parser(
         "tts", help="Local English-only text to speech via KittenTTS"
@@ -416,6 +465,76 @@ def run_vtt(
     )
 
 
+def run_video(
+    args: argparse.Namespace, config: AppConfig, verbose: bool, config_path: Path | None
+) -> CommandResult:
+    source: str = str(args.input)
+    ensure_path_exists(source)
+    output_dir: str = (
+        str(args.output_dir)
+        if args.output_dir is not None
+        else config.video.output_dir
+    )
+    max_frames: int = int(args.max_frames) if args.max_frames is not None else config.video.max_frames
+    seconds_per_frame: float = (
+        float(args.seconds_per_frame)
+        if args.seconds_per_frame is not None
+        else config.video.seconds_per_frame
+    )
+    frame_format: str = args.frame_format or config.video.frame_format
+    requested_timestamps: list[float] | None = (
+        [float(item) for item in args.at_seconds]
+        if args.at_seconds is not None
+        else None
+    )
+    align_to_segments: bool = (
+        args.align_to_segments
+        if args.align_to_segments is not None
+        else config.video.align_to_segments
+    )
+    transcribe: bool = args.transcribe if args.transcribe is not None else config.video.transcribe
+    timestamps: str = args.timestamps if args.timestamps is not None else config.video.timestamps
+    model: str = args.model or config.stt.model
+    language: str = args.language if args.language is not None else config.stt.language
+    prompt: str = args.prompt if args.prompt is not None else config.stt.prompt
+
+    payload: dict[str, Any] = video_provider.analyze_local_video(
+        source=source,
+        output_dir=output_dir,
+        max_frames=max_frames,
+        seconds_per_frame=seconds_per_frame,
+        frame_format=frame_format,
+        align_to_segments=align_to_segments,
+        requested_timestamps=requested_timestamps,
+        transcribe=transcribe,
+        timeout_seconds=config.network.timeout_seconds,
+        model=model,
+        language=language,
+        timestamps=timestamps,
+        temperature=config.stt.temperature,
+        prompt=prompt,
+        proxy=config.network.proxy or None,
+    )
+    return CommandResult(
+        ok=True,
+        command="video",
+        provider="local+groq",
+        data=payload,
+        error=None,
+        meta={
+            **_meta("video", config, config_path, verbose),
+            "input": source,
+            "max_frames": max_frames,
+            "seconds_per_frame": seconds_per_frame,
+            "frame_format": frame_format,
+            "requested_timestamps": requested_timestamps or [],
+            "align_to_segments": align_to_segments,
+            "transcribe": transcribe,
+            "timestamps": timestamps,
+        },
+    )
+
+
 def run_tts(
     args: argparse.Namespace, config: AppConfig, verbose: bool, config_path: Path | None
 ) -> CommandResult:
@@ -468,6 +587,8 @@ def dispatch(
         return run_extract(args, config, verbose, config_path)
     if args.command == "vtt":
         return run_vtt(args, config, verbose, config_path)
+    if args.command == "video":
+        return run_video(args, config, verbose, config_path)
     if args.command == "tts":
         return run_tts(args, config, verbose, config_path)
     if args.command == "tg":

@@ -15,6 +15,7 @@ Current command groups:
 - `search` — web search via Parallel
 - `extract` — URL extraction via Parallel
 - `vtt` — video to text via Supadata
+- `video` — local video/GIF to frames plus optional audio transcript
 - `tg` — Telegram CLI via Telethon
 
 All command results go to stdout as JSON.
@@ -84,7 +85,7 @@ Default config path:
 ```
 
 By default, HTTP tools do **not** inherit shell proxy environment variables.
-If you want proxying for `stt`, `search`, `extract`, or `vtt`, set it explicitly in config:
+If you want proxying for `stt`, `search`, `extract`, `vtt`, or transcript-enabled `video`, set it explicitly in config:
 
 ```toml
 [network]
@@ -155,6 +156,56 @@ kit vtt https://www.youtube.com/watch?v=dQw4w9WgXcQ
 kit vtt https://youtu.be/dQw4w9WgXcQ --mode native
 kit vtt https://youtu.be/dQw4w9WgXcQ --chunks
 ```
+
+### Local video to frames + transcript
+
+Requires local `ffmpeg` and `ffprobe` on `PATH`.
+
+```bash
+kit video ./clip.mp4
+kit video ./clip.mp4 --max-frames 30 --seconds-per-frame 2
+kit video ./clip.mp4 --timestamps word
+kit video ./clip.mp4 --at 3.5 --at 9 --at 12.2
+kit video ./clip.mp4 --no-align-to-segments
+kit video ./clip.mp4 --no-transcribe
+kit video ./animation.gif --max-frames 12
+```
+
+Default behavior:
+
+- extracts up to `30` frames
+- spreads frames across the full duration
+- if transcript segments exist, nudges frame timestamps toward nearby speech segments
+- if `--at` is provided, extracts frames exactly near those second offsets instead of auto spreading
+- writes a run directory with:
+  - `frames/`
+  - optional `audio.wav`
+  - `manifest.json`
+- returns JSON with:
+  - frame paths
+  - transcript text
+  - transcript segments with timestamps
+  - a simple `timeline` that pairs each frame with the nearest transcript segment
+
+Config example:
+
+```toml
+[video]
+output_dir = "~/.local/state/assistant-tools/video"
+max_frames = 30
+seconds_per_frame = 2.0
+frame_format = "jpg"
+align_to_segments = true
+transcribe = true
+timestamps = "segment"
+```
+
+Notes for agents:
+
+- `stt`/`video` with `timestamps = "segment"` already returns speech timing.
+- For a first pass, call `video` without `--at` and inspect `timeline` plus `frames`.
+- If a specific spoken moment matters, call `video --at <seconds>` to fetch only the frame(s) around those timestamps.
+- If there is no useful audio, the tool still returns evenly spread frames for visual inspection.
 
 ## Telegram
 

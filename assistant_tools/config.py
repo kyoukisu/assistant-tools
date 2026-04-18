@@ -14,6 +14,7 @@ from assistant_tools.models import SttConfig
 from assistant_tools.models import TgConfig
 from assistant_tools.models import TgProfileConfig
 from assistant_tools.models import TtsConfig
+from assistant_tools.models import VideoConfig
 from assistant_tools.models import VttConfig
 
 
@@ -45,6 +46,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     tts_section: dict[str, Any] = _section(raw, "tts")
     tts_section.pop("backend", None)
     tts_config: TtsConfig = TtsConfig(**tts_section)
+    video_config: VideoConfig = VideoConfig(**_section(raw, "video"))
     tg_section: dict[str, Any] = _section(raw, "tg")
     raw_profiles: Any = tg_section.pop("profiles", {})
     profile_map: dict[str, TgProfileConfig] = {}
@@ -71,6 +73,7 @@ def load_config(config_path: Path | None = None) -> AppConfig:
         extract=extract_config,
         vtt=vtt_config,
         tts=tts_config,
+        video=video_config,
         tg=tg_config,
     )
 
