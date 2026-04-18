@@ -628,6 +628,7 @@ async def wait_next_message(
 
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
+        me: Any = await client.get_me()
         input_peer: Any = await client.get_input_entity(entity)
         loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
         waiter: asyncio.Future[Any] = loop.create_future()
@@ -637,7 +638,14 @@ async def wait_next_message(
                 return
             waiter.set_result(event.message)
 
-        builder: events.NewMessage = events.NewMessage(chats=input_peer, incoming=True)
+        is_self_chat: bool = bool(
+            me is not None and getattr(entity, "id", None) == getattr(me, "id", None)
+        )
+        builder: events.NewMessage = (
+            events.NewMessage(chats=input_peer)
+            if is_self_chat
+            else events.NewMessage(chats=input_peer, incoming=True)
+        )
         client.add_event_handler(_on_message, builder)
         try:
             message: Any = await asyncio.wait_for(waiter, timeout=timeout_seconds)
