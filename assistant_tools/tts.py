@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from contextlib import redirect_stderr
+from contextlib import redirect_stdout
 from datetime import UTC
 from datetime import datetime
 import importlib
+import io
 from pathlib import Path
 import tempfile
 import re
@@ -67,9 +70,15 @@ def _load_dependencies() -> tuple[Any, Any]:
     return KittenTTS, sf
 
 
+def _silence_upstream(call: Any) -> Any:
+    sink = io.StringIO()
+    with redirect_stdout(sink), redirect_stderr(sink):
+        return call()
+
+
 def _load_model(KittenTTS: Any, model: str) -> Any:
     try:
-        return KittenTTS(model)
+        return _silence_upstream(lambda: KittenTTS(model))
     except Exception as err:
         raise AssistantToolsError(
             f"Failed to load KittenTTS model '{model}': {err}",
@@ -97,7 +106,9 @@ def synthesize(
     model_instance: Any = _load_model(KittenTTS, model)
 
     try:
-        audio: Any = model_instance.generate(text, voice=voice, speed=speed, clean_text=clean_text)
+        audio: Any = _silence_upstream(
+            lambda: model_instance.generate(text, voice=voice, speed=speed, clean_text=clean_text)
+        )
     except Exception as err:
         raise AssistantToolsError(
             f"KittenTTS synthesis failed: {err}",
