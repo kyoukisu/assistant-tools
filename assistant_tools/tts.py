@@ -68,13 +68,6 @@ def _load_dependencies() -> tuple[Any, Any]:
 
 
 def _load_model(KittenTTS: Any, model: str, backend: str) -> Any:
-    if backend != "auto":
-        raise AssistantToolsError(
-            "Installed KittenTTS does not support backend selection; use backend='auto' or upgrade kittentts.",
-            error_type="unsupported_option",
-            exit_code=2,
-        )
-
     try:
         return KittenTTS(model)
     except Exception as err:
