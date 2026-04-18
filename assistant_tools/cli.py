@@ -176,6 +176,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--full", action="store_true", help="Return fuller sent message object"
     )
 
+    tg_send_photo = tg_subparsers.add_parser("send-photo", help="Send local image as Telegram photo")
+    tg_send_photo.add_argument("peer", help="Target peer")
+    tg_send_photo.add_argument("path", help="Local image path")
+    tg_send_photo.add_argument("--caption", default=None, help="Optional caption")
+    tg_send_photo.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send_photo.add_argument(
+        "--full", action="store_true", help="Return fuller sent message object"
+    )
+
     tg_send_voice = tg_subparsers.add_parser(
         "send-voice", help="Send local audio file as Telegram voice note"
     )
@@ -197,6 +206,16 @@ def build_parser() -> argparse.ArgumentParser:
     tg_search.add_argument("query", help="Search query")
     tg_search.add_argument("--limit", type=int, default=20)
     tg_search.add_argument("--full", action="store_true", help="Return fuller message objects")
+
+    tg_wait_next = tg_subparsers.add_parser("wait-next", help="Wait for the next incoming message")
+    tg_wait_next.add_argument("peer", help="Target peer")
+    tg_wait_next.add_argument(
+        "--timeout-seconds",
+        type=float,
+        required=True,
+        help="How long to wait before timing out",
+    )
+    tg_wait_next.add_argument("--full", action="store_true", help="Return fuller message object")
 
     tg_media_info = tg_subparsers.add_parser("media-info", help="Show media metadata")
     tg_media_info.add_argument("peer", help="Target peer")
@@ -510,6 +529,12 @@ def dispatch(
                     tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
                 )
             )
+        if args.tg_command == "send-photo":
+            return tg_commands.run(
+                tg_commands.send_photo(
+                    tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
+                )
+            )
         if args.tg_command == "send-voice":
             return tg_commands.run(
                 tg_commands.send_voice(
@@ -523,6 +548,15 @@ def dispatch(
         if args.tg_command == "search":
             return tg_commands.run(
                 tg_commands.search_messages(tg_config, args.peer, args.query, args.limit, args.full)
+            )
+        if args.tg_command == "wait-next":
+            return tg_commands.run(
+                tg_commands.wait_next_message(
+                    tg_config,
+                    args.peer,
+                    float(args.timeout_seconds),
+                    args.full,
+                )
             )
         if args.tg_command == "media-info":
             return tg_commands.run(

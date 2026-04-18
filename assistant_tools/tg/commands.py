@@ -10,11 +10,16 @@ import tempfile
 from typing import Any
 
 from telethon import TelegramClient
+from telethon import events
+from telethon import utils
 from telethon.errors import FloodWaitError
 from telethon.errors import PasswordHashInvalidError
 from telethon.errors import PhoneCodeInvalidError
 from telethon.errors import SessionPasswordNeededError
 from telethon.sessions import StringSession
+from telethon.tl.types import PeerChannel
+from telethon.tl.types import PeerChat
+from telethon.tl.types import PeerUser
 
 from assistant_tools.models import CommandResult
 from assistant_tools.tg.client import make_client
@@ -52,6 +57,55 @@ def _ensure_local_file(path_value: str) -> Path:
     if not path.is_file():
         raise _error("invalid_file", f"Input path is not a file: {path}", exit_code=2)
     return path.resolve()
+
+
+def _parse_marked_peer(peer: str) -> PeerChannel | PeerChat | PeerUser | None:
+    try:
+        marked_id: int = int(peer)
+    except ValueError:
+        return None
+
+    real_id: int
+    peer_type: type[Any]
+    real_id, peer_type = utils.resolve_id(marked_id)
+    if peer_type is PeerChannel:
+        return PeerChannel(real_id)
+    if peer_type is PeerChat:
+        return PeerChat(real_id)
+    if peer_type is PeerUser:
+        return PeerUser(real_id)
+    return None
+
+
+async def _resolve_peer_entity(client: TelegramClient, peer: str) -> Any:
+    marked_peer: PeerChannel | PeerChat | PeerUser | None = _parse_marked_peer(peer)
+    if marked_peer is not None:
+        try:
+            return await client.get_input_entity(marked_peer)
+        except ValueError:
+            pass
+
+        async for dialog in client.iter_dialogs():
+            entity: Any = getattr(dialog, "entity", None)
+            if entity is None:
+                continue
+            if utils.get_peer_id(entity) == int(peer):
+                return await client.get_input_entity(entity)
+
+        raise _error(
+            "peer_not_found",
+            (
+                f"Cannot resolve Telegram peer from id {peer}. "
+                "This usually means the peer is not in the local Telethon entity cache yet. "
+                "Use a username/title first, or refresh dialogs so the entity and access hash are cached."
+            ),
+            exit_code=3,
+        )
+
+    try:
+        return await client.get_input_entity(peer)
+    except ValueError:
+        return await client.get_entity(peer)
 
 
 def _voice_upload_path(path: Path) -> tuple[Path, bool]:
@@ -261,7 +315,7 @@ async def auth_logout(config: ResolvedTgConfig) -> CommandResult:
 
 async def resolve_peer(config: ResolvedTgConfig, peer: str) -> CommandResult:
     async with telegram_client(config) as client:
-        entity: Any = await client.get_entity(peer)
+        entity: Any = await _resolve_peer_entity(client, peer)
         return _ok(
             "tg.resolve",
             {"chat": normalize_chat(entity)},
@@ -283,7 +337,7 @@ async def dialogs(config: ResolvedTgConfig, limit: int, full: bool) -> CommandRe
 
 async def participants(config: ResolvedTgConfig, peer: str, limit: int) -> CommandResult:
     async with telegram_client(config) as client:
-        entity: Any = await client.get_entity(peer)
+        entity: Any = await _resolve_peer_entity(client, peer)
         items: list[dict[str, Any]] = []
         count: int = 0
         async for user in client.iter_participants(entity):
@@ -302,7 +356,7 @@ async def history(
     config: ResolvedTgConfig, peer: str, limit: int, offset_id: int, full: bool
 ) -> CommandResult:
     async with telegram_client(config) as client:
-        entity: Any = await client.get_entity(peer)
+        entity: Any = await _resolve_peer_entity(client, peer)
         items: list[dict[str, Any]] = []
         async for message in client.iter_messages(entity, limit=limit, offset_id=offset_id):
             items.append(normalize_message(message, chat_entity=entity, full=full))
@@ -323,7 +377,7 @@ async def get_messages(
     config: ResolvedTgConfig, peer: str, message_ids: list[int], full: bool
 ) -> CommandResult:
     async with telegram_client(config) as client:
-        entity: Any = await client.get_entity(peer)
+        entity: Any = await _resolve_peer_entity(client, peer)
         messages: Any = await client.get_messages(entity, ids=message_ids)
         if isinstance(messages, list):
             items: list[dict[str, Any]] = [
@@ -344,7 +398,7 @@ async def send_message(
     config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool
 ) -> CommandResult:
     async with telegram_client(config) as client:
-        entity: Any = await client.get_entity(peer)
+        entity: Any = await _resolve_peer_entity(client, peer)
         if reply_to_message_id is None:
             message: Any = await client.send_message(entity, text)
         else:
@@ -371,7 +425,7 @@ async def send_file(
 ) -> CommandResult:
     input_path: Path = _ensure_local_file(path_value)
     async with telegram_client(config) as client:
-        entity: Any = await client.get_entity(peer)
+        entity: Any = await _resolve_peer_entity(client, peer)
         message: Any = await client.send_file(
             entity,
             str(input_path),
@@ -381,6 +435,41 @@ async def send_file(
         )
         return _ok(
             "tg.send-file",
+            {
+                "path": str(input_path),
+                "message": normalize_message(message, chat_entity=entity, full=full),
+            },
+            {
+                "peer": peer,
+                "path": str(input_path),
+                "caption": caption,
+                "reply_to_message_id": reply_to_message_id,
+                "profile": config.profile,
+                "full": full,
+            },
+        )
+
+
+async def send_photo(
+    config: ResolvedTgConfig,
+    peer: str,
+    path_value: str,
+    caption: str | None,
+    reply_to_message_id: int | None,
+    full: bool,
+) -> CommandResult:
+    input_path: Path = _ensure_local_file(path_value)
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        message: Any = await client.send_file(
+            entity,
+            str(input_path),
+            caption=caption,
+            reply_to=reply_to_message_id,
+            force_document=False,
+        )
+        return _ok(
+            "tg.send-photo",
             {
                 "path": str(input_path),
                 "message": normalize_message(message, chat_entity=entity, full=full),
@@ -410,7 +499,7 @@ async def send_voice(
     upload_path, converted = _voice_upload_path(input_path)
     try:
         async with telegram_client(config) as client:
-            entity: Any = await client.get_entity(peer)
+            entity: Any = await _resolve_peer_entity(client, peer)
             message: Any = await client.send_file(
                 entity,
                 str(upload_path),
@@ -452,7 +541,7 @@ async def search_messages(
     config: ResolvedTgConfig, peer: str, query: str, limit: int, full: bool
 ) -> CommandResult:
     async with telegram_client(config) as client:
-        entity: Any = await client.get_entity(peer)
+        entity: Any = await _resolve_peer_entity(client, peer)
         items: list[dict[str, Any]] = []
         async for message in client.iter_messages(entity, search=query, limit=limit):
             items.append(normalize_message(message, chat_entity=entity, full=full))
@@ -531,11 +620,53 @@ async def find_dialog(
     )
 
 
+async def wait_next_message(
+    config: ResolvedTgConfig, peer: str, timeout_seconds: float, full: bool
+) -> CommandResult:
+    if timeout_seconds <= 0:
+        raise _error("invalid_timeout", "timeout_seconds must be greater than 0", exit_code=2)
+
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        input_peer: Any = await client.get_input_entity(entity)
+        loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+        waiter: asyncio.Future[Any] = loop.create_future()
+
+        async def _on_message(event: Any) -> None:
+            if waiter.done():
+                return
+            waiter.set_result(event.message)
+
+        builder: events.NewMessage = events.NewMessage(chats=input_peer, incoming=True)
+        client.add_event_handler(_on_message, builder)
+        try:
+            message: Any = await asyncio.wait_for(waiter, timeout=timeout_seconds)
+        except TimeoutError as err:
+            raise _error(
+                "timeout",
+                f"Timed out waiting for the next incoming message after {timeout_seconds} seconds",
+                exit_code=4,
+            ) from err
+        finally:
+            client.remove_event_handler(_on_message, builder)
+
+        return _ok(
+            "tg.wait-next",
+            {"message": normalize_message(message, chat_entity=entity, full=full)},
+            {
+                "peer": peer,
+                "timeout_seconds": timeout_seconds,
+                "profile": config.profile,
+                "full": full,
+            },
+        )
+
+
 async def media_info(
     config: ResolvedTgConfig, peer: str, message_id: int, full: bool
 ) -> CommandResult:
     async with telegram_client(config) as client:
-        entity: Any = await client.get_entity(peer)
+        entity: Any = await _resolve_peer_entity(client, peer)
         message: Any = await client.get_messages(entity, ids=message_id)
         if not message:
             raise _error("not_found", "Message not found")
@@ -563,7 +694,7 @@ async def media_download(
     target_dir.mkdir(parents=True, exist_ok=True)
 
     async with telegram_client(config) as client:
-        entity: Any = await client.get_entity(peer)
+        entity: Any = await _resolve_peer_entity(client, peer)
         message: Any = await client.get_messages(entity, ids=message_id)
         if not message:
             raise _error("not_found", "Message not found")
@@ -601,8 +732,8 @@ async def copy_message(
     full: bool,
 ) -> CommandResult:
     async with telegram_client(config) as client:
-        source_entity: Any = await client.get_entity(source_peer)
-        target_entity: Any = await client.get_entity(target_peer)
+        source_entity: Any = await _resolve_peer_entity(client, source_peer)
+        target_entity: Any = await _resolve_peer_entity(client, target_peer)
         message: Any = await client.forward_messages(target_entity, message_id, source_entity)
         normalized: dict[str, Any]
         if isinstance(message, list):
