@@ -10,10 +10,13 @@ def test_parser_exposes_version_flag() -> None:
     assert "--version" in action_flags
 
 
+
 def test_package_version_fallback_is_semverish() -> None:
     parts = __version__.split(".")
     assert len(parts) == 3
     assert all(part.isdigit() for part in parts)
+
+
 
 def test_kitten_tts_extra_is_declared() -> None:
     import tomllib
@@ -21,6 +24,6 @@ def test_kitten_tts_extra_is_declared() -> None:
 
     pyproject = tomllib.loads(Path("pyproject.toml").read_text())
     assert pyproject["project"]["optional-dependencies"]["kitten-tts"] == ["kittentts"]
-    assert pyproject["tool"]["uv"]["sources"]["kittentts"]["url"].endswith(
-        "kittentts-0.8.1-py3-none-any.whl"
-    )
+    source = pyproject["tool"]["uv"]["sources"]["kittentts"]
+    assert source["git"] == "https://github.com/KittenML/KittenTTS"
+    assert source["rev"] == "395171a68d5c73a50027436988fb856c30c748b8"

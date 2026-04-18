@@ -45,7 +45,7 @@ kit --help
 
 ## TTS add-on
 
-The core package is now publishable-friendly. The `tts` command still depends on upstream KittenTTS, which upstream currently distributes via a release wheel URL rather than a normal package index flow.
+The core package is now publishable-friendly. The `tts` command depends on upstream KittenTTS and keeps that dependency behind the explicit `kitten-tts` extra.
 
 If you want `tts`, install the package with its `kitten-tts` extra:
 
@@ -53,7 +53,7 @@ If you want `tts`, install the package with its `kitten-tts` extra:
 uv tool install 'assistant-tools[kitten-tts] @ git+https://github.com/kyoukisu/assistant-tools'
 ```
 
-This extra increases the installed tool environment from about `82MB` to about `7.2GB` (roughly `+7.1GB`).
+With the current upstream KittenTTS source, this extra increases the installed tool environment to roughly `250–300MB`, plus the selected model download on first use (for example about `41MB` for `kitten-tts-micro-0.8`).
 
 If you do not install that extra dependency, every non-TTS command still works, and `tts` fails with a direct JSON error telling you what is missing.
 

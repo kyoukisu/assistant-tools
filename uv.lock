@@ -1,6 +1,10 @@
 version = 1
 revision = 3
 requires-python = ">=3.11"
+resolution-markers = [
+    "python_full_version >= '3.12'",
+    "python_full_version < '3.12'",
+]
 
 [[package]]
 name = "annotated-doc"
@@ -31,11 +35,15 @@ source = { editable = "." }
 dependencies = [
     { name = "cryptg" },
     { name = "httpx" },
-    { name = "kittentts" },
     { name = "python-socks" },
     { name = "socksio" },
     { name = "soundfile" },
     { name = "telethon" },
+]
+
+[package.optional-dependencies]
+kitten-tts = [
+    { name = "kittentts" },
 ]
 
 [package.dev-dependencies]
@@ -49,12 +57,13 @@ dev = [
 requires-dist = [
     { name = "cryptg", specifier = ">=0.5.2" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "kittentts", git = "https://github.com/KittenML/KittenTTS?rev=395171a68d5c73a50027436988fb856c30c748b8" },
+    { name = "kittentts", marker = "extra == 'kitten-tts'", git = "https://github.com/KittenML/KittenTTS?rev=395171a68d5c73a50027436988fb856c30c748b8" },
     { name = "python-socks", extras = ["asyncio"], specifier = ">=2.8.1" },
     { name = "socksio", specifier = ">=1.0.0" },
     { name = "soundfile", specifier = ">=0.13.1" },
     { name = "telethon", specifier = ">=1.43.0" },
 ]
+provides-extras = ["kitten-tts"]
 
 [package.metadata.requires-dev]
 dev = [

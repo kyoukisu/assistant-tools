@@ -29,7 +29,7 @@ kit = "assistant_tools.cli:main"
 [tool.uv]
 package = true
 [tool.uv.sources]
-kittentts = { url = "https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl" }
+kittentts = { git = "https://github.com/KittenML/KittenTTS", rev = "395171a68d5c73a50027436988fb856c30c748b8" }
 
 [dependency-groups]
 dev = [
