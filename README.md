@@ -264,6 +264,7 @@ kit tg send-file me /tmp/doc.pdf
 kit tg send-photo me /tmp/image.png --caption "see this"
 kit tg send-voice me /tmp/voice.ogg
 kit tg send-voice me /tmp/hello.wav
+kit tg speak me "You can feel the shift before you can name it." --voice Rosie
 kit tg wait-next me --timeout-seconds 30
 kit tg react me 123 "🔥"
 kit tg copy me 123 another_chat
@@ -274,6 +275,7 @@ Notes:
 - `send-file` sends a local file as a document.
 - `send-photo` sends a local image as a Telegram photo.
 - `send-voice` sends a local audio file as a Telegram voice note.
+- `speak` synthesizes English speech locally and sends it as a Telegram voice note in one step.
 - `wait-next` waits for the next incoming message in the target chat and requires `--timeout-seconds`.
 - If `send-voice` gets a non-ogg/non-opus file such as WAV, it auto-converts it to OGG/Opus with `ffmpeg` before upload.
 

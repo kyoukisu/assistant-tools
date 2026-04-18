@@ -26,9 +26,7 @@ from assistant_tools.utils import require_env
 
 def build_parser() -> argparse.ArgumentParser:
     parser: argparse.ArgumentParser = argparse.ArgumentParser(prog="kit")
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--config", type=Path, default=None, help="Path to config TOML file")
     parser.add_argument("--verbose", action="store_true", help="Include config snapshot in meta")
 
@@ -85,11 +83,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     video_parser = subparsers.add_parser(
-        "video", help="Extract evenly spread frames and optional audio transcript from a local video"
+        "video",
+        help="Extract evenly spread frames and optional audio transcript from a local video",
     )
     video_parser.add_argument("input", help="Local video or GIF path")
-    video_parser.add_argument("--output-dir", type=Path, default=None, help="Run output directory root")
-    video_parser.add_argument("--max-frames", type=int, default=None, help="Maximum frames to extract")
+    video_parser.add_argument(
+        "--output-dir", type=Path, default=None, help="Run output directory root"
+    )
+    video_parser.add_argument(
+        "--max-frames", type=int, default=None, help="Maximum frames to extract"
+    )
     video_parser.add_argument(
         "--seconds-per-frame",
         type=float,
@@ -219,7 +222,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--full", action="store_true", help="Return fuller sent message object"
     )
 
-    tg_send_photo = tg_subparsers.add_parser("send-photo", help="Send local image as Telegram photo")
+    tg_send_photo = tg_subparsers.add_parser(
+        "send-photo", help="Send local image as Telegram photo"
+    )
     tg_send_photo.add_argument("peer", help="Target peer")
     tg_send_photo.add_argument("path", help="Local image path")
     tg_send_photo.add_argument("--caption", default=None, help="Optional caption")
@@ -238,6 +243,24 @@ def build_parser() -> argparse.ArgumentParser:
     tg_send_voice.add_argument(
         "--full", action="store_true", help="Return fuller sent message object"
     )
+
+    tg_speak = tg_subparsers.add_parser(
+        "speak", help="Synthesize English speech and send it as a Telegram voice note"
+    )
+    tg_speak.add_argument("peer", help="Target peer")
+    tg_speak.add_argument("text", help="English text to synthesize and send")
+    tg_speak.add_argument("--caption", default=None, help="Optional caption")
+    tg_speak.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_speak.add_argument("--voice", default=None, help="Voice name override")
+    tg_speak.add_argument("--model", default=None, help="KittenTTS model override")
+    tg_speak.add_argument("--speed", type=float, default=None, help="Speech speed")
+    tg_speak.add_argument(
+        "--clean-text",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Normalize text automatically before synthesis",
+    )
+    tg_speak.add_argument("--full", action="store_true", help="Return fuller sent message object")
 
     tg_react = tg_subparsers.add_parser("react", help="React to a message")
     tg_react.add_argument("peer", help="Target peer")
@@ -471,11 +494,11 @@ def run_video(
     source: str = str(args.input)
     ensure_path_exists(source)
     output_dir: str = (
-        str(args.output_dir)
-        if args.output_dir is not None
-        else config.video.output_dir
+        str(args.output_dir) if args.output_dir is not None else config.video.output_dir
     )
-    max_frames: int = int(args.max_frames) if args.max_frames is not None else config.video.max_frames
+    max_frames: int = (
+        int(args.max_frames) if args.max_frames is not None else config.video.max_frames
+    )
     seconds_per_frame: float = (
         float(args.seconds_per_frame)
         if args.seconds_per_frame is not None
@@ -483,9 +506,7 @@ def run_video(
     )
     frame_format: str = args.frame_format or config.video.frame_format
     requested_timestamps: list[float] | None = (
-        [float(item) for item in args.at_seconds]
-        if args.at_seconds is not None
-        else None
+        [float(item) for item in args.at_seconds] if args.at_seconds is not None else None
     )
     align_to_segments: bool = (
         args.align_to_segments
@@ -575,6 +596,81 @@ def run_tts(
     )
 
 
+def run_tg_speak(
+    args: argparse.Namespace,
+    config: AppConfig,
+    tg_config: Any,
+    verbose: bool,
+    config_path: Path | None,
+) -> CommandResult:
+    model: str = args.model or config.tts.model
+    voice: str = args.voice or config.tts.voice
+    speed: float = float(args.speed) if args.speed is not None else config.tts.speed
+    clean_text: bool = args.clean_text if args.clean_text is not None else config.tts.clean_text
+
+    payload: dict[str, Any] = tts_provider.synthesize(
+        text=str(args.text),
+        model=model,
+        voice=voice,
+        speed=speed,
+        clean_text=clean_text,
+        output=None,
+        output_dir=config.tts.output_dir,
+        save=True,
+        play=False,
+        volume=config.tts.volume,
+    )
+    generated_path: str | None = payload.get("path")
+    if not generated_path:
+        raise AssistantToolsError(
+            "KittenTTS did not return an output file path",
+            error_type="tts_write_error",
+            exit_code=5,
+        )
+
+    voice_result: CommandResult = tg_commands.run(
+        tg_commands.send_voice(
+            tg_config,
+            args.peer,
+            generated_path,
+            args.caption,
+            args.reply_to,
+            args.full,
+        )
+    )
+    if payload.get("saved"):
+        Path(generated_path).unlink(missing_ok=True)
+
+    assert voice_result.data is not None
+    data: dict[str, Any] = dict(voice_result.data)
+    data["tts"] = {
+        "voice": voice,
+        "model": model,
+        "speed": speed,
+        "clean_text": clean_text,
+        "text_chars": len(str(args.text)),
+    }
+    meta: dict[str, Any] = dict(voice_result.meta)
+    meta.update(
+        {
+            **_meta("tg.speak", config, config_path, verbose),
+            "text_chars": len(str(args.text)),
+            "voice": voice,
+            "model": model,
+            "speed": speed,
+            "clean_text": clean_text,
+        }
+    )
+    return CommandResult(
+        ok=voice_result.ok,
+        command="tg.speak",
+        provider="kittentts+telethon",
+        data=data,
+        error=voice_result.error,
+        meta=meta,
+    )
+
+
 def dispatch(
     args: argparse.Namespace, config: AppConfig, config_path: Path | None
 ) -> CommandResult:
@@ -654,6 +750,8 @@ def dispatch(
                     tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
                 )
             )
+        if args.tg_command == "speak":
+            return run_tg_speak(args, config, tg_config, verbose, config_path)
         if args.tg_command == "react":
             return tg_commands.run(
                 tg_commands.react(tg_config, args.peer, args.message_id, args.emoji)
