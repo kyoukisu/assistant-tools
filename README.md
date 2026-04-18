@@ -53,7 +53,7 @@ If you want `tts`, install the package with its `kitten-tts` extra:
 uv tool install 'assistant-tools[kitten-tts] @ git+https://github.com/kyoukisu/assistant-tools'
 ```
 
-With the current upstream KittenTTS source, this extra increases the installed tool environment to roughly `250–300MB`, plus the selected model download on first use (for example about `41MB` for `kitten-tts-micro-0.8`).
+With the current upstream KittenTTS source, a clean install with this extra is roughly `300MB` for the tool environment itself, plus the selected model download on first use (for example about `41MB` for `kitten-tts-micro-0.8`, so about `350MB` total in that default case).
 
 If you do not install that extra dependency, every non-TTS command still works, and `tts` fails with a direct JSON error telling you what is missing.
 
