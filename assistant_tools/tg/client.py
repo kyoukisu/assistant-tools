@@ -30,7 +30,7 @@ def _parse_proxy(proxy_url: str | None) -> tuple[Any, ...] | None:
     return (scheme, parsed.hostname, parsed.port, rdns, username, password)
 
 
-def make_client(config: ResolvedTgConfig) -> TelegramClient:
+def make_client(config: ResolvedTgConfig, *, receive_updates: bool = False) -> TelegramClient:
     session: str | StringSession
     if config.session_string:
         session = StringSession(config.session_string)
@@ -44,7 +44,7 @@ def make_client(config: ResolvedTgConfig) -> TelegramClient:
         "api_id": config.api_id,
         "api_hash": config.api_hash,
         "flood_sleep_threshold": config.sleep_threshold,
-        "receive_updates": False,
+        "receive_updates": receive_updates,
     }
     if proxy_config is not None:
         client_kwargs["proxy"] = proxy_config
@@ -53,8 +53,10 @@ def make_client(config: ResolvedTgConfig) -> TelegramClient:
 
 
 @asynccontextmanager
-async def telegram_client(config: ResolvedTgConfig) -> AsyncIterator[TelegramClient]:
-    client: TelegramClient = make_client(config)
+async def telegram_client(
+    config: ResolvedTgConfig, *, receive_updates: bool = False
+) -> AsyncIterator[TelegramClient]:
+    client: TelegramClient = make_client(config, receive_updates=receive_updates)
     await client.connect()
     try:
         yield client

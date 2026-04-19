@@ -626,7 +626,7 @@ async def wait_next_message(
     if timeout_seconds <= 0:
         raise _error("invalid_timeout", "timeout_seconds must be greater than 0", exit_code=2)
 
-    async with telegram_client(config) as client:
+    async with telegram_client(config, receive_updates=True) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
         me: Any = await client.get_me()
         input_peer: Any = await client.get_input_entity(entity)
