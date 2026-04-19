@@ -44,6 +44,42 @@ kit --version
 kit --help
 ```
 
+## Nix / NixOS / Home Manager
+
+The repository now exposes a Nix flake package.
+
+Build it directly:
+
+```bash
+nix build github:kyoukisu/assistant-tools
+```
+
+Run it directly:
+
+```bash
+nix run github:kyoukisu/assistant-tools -- --help
+nix run github:kyoukisu/assistant-tools#kit -- tts "Hello there"
+```
+
+Use it from Home Manager:
+
+```nix
+{
+  inputs.assistant-tools.url = "github:kyoukisu/assistant-tools";
+
+  outputs = { self, nixpkgs, home-manager, assistant-tools, ... }: {
+    # ...
+    home-manager.users.your-user = { pkgs, ... }: {
+      home.packages = [
+        assistant-tools.packages.${pkgs.system}.default
+      ];
+    };
+  };
+}
+```
+
+This path is the recommended declarative install method on NixOS. Runtime state such as Telegram session files, caches, and downloaded TTS models still lives outside the Nix store.
+
 ## TTS add-on
 
 The core package is now publishable-friendly. The `tts` command depends on upstream KittenTTS and keeps that dependency behind the explicit `kitten-tts` extra.
