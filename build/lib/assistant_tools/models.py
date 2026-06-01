@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from dataclasses import field
+from typing import cast
+from typing import Any
+
+
+@dataclass(slots=True)
+class NetworkConfig:
+    timeout_seconds: float = 60.0
+    proxy: str = ""
+
+
+@dataclass(slots=True)
+class SttConfig:
+    url: str = "https://api.groq.com/openai/v1/audio/transcriptions"
+    api_key: str = ""
+    model: str = "whisper-large-v3"
+    language: str = ""
+    timestamps: str = "none"
+    temperature: float = 0.0
+    prompt: str = ""
+
+
+@dataclass(slots=True)
+class SearchConfig:
+    mode: str = "agentic"
+    max_results: int = 5
+    max_chars_per_result: int = 4000
+    max_chars_total: int = 12000
+
+
+@dataclass(slots=True)
+class ExtractConfig:
+    full_content: bool = False
+    max_chars_per_result: int = 5000
+
+
+@dataclass(slots=True)
+class VttConfig:
+    mode: str = "auto"
+    text: bool = True
+    lang: str = ""
+    wait: bool = True
+    poll_interval_seconds: float = 1.0
+    wait_timeout_seconds: float = 180.0
+
+
+@dataclass(slots=True)
+class TtsConfig:
+    backend: str = "supertonic"
+    model: str = "supertonic-3"
+    voice: str = "F1"
+    language: str = ""
+    speed: float = 1.05
+    clean_text: bool = False
+    autoplay: bool = True
+    volume: int = 45000
+    output_dir: str = "~/.local/state/assistant-tools/tts"
+
+
+@dataclass(slots=True)
+class VideoConfig:
+    output_dir: str = "~/.local/state/assistant-tools/video"
+    max_frames: int = 30
+    seconds_per_frame: float = 2.0
+    frame_format: str = "jpg"
+    align_to_segments: bool = True
+    transcribe: bool = True
+    timestamps: str = "segment"
+
+
+@dataclass(slots=True)
+class TgProfileConfig:
+    api_id: int = 0
+    api_hash: str = ""
+    session_file: str = ""
+    download_dir: str = ""
+    cache_dir: str = ""
+    session_string: str = ""
+    proxy: str = ""
+
+
+@dataclass(slots=True)
+class TgConfig:
+    api_id: int = 0
+    api_hash: str = ""
+    default_profile: str = "main"
+    session_file: str = "~/.local/state/assistant-tools/tg/main.session"
+    session_dir: str = "~/.local/state/assistant-tools/tg/sessions"
+    download_dir: str = "~/.local/state/assistant-tools/tg/downloads"
+    cache_dir: str = "~/.local/state/assistant-tools/tg/cache"
+    session_string: str = ""
+    proxy: str = ""
+    takeout: bool = False
+    sleep_threshold: int = 10
+    hide_password: bool = False
+    profiles: dict[str, TgProfileConfig] = field(
+        default_factory=lambda: cast(dict[str, TgProfileConfig], {})
+    )
+
+
+@dataclass(slots=True)
+class AppConfig:
+    network: NetworkConfig
+    stt: SttConfig
+    search: SearchConfig
+    extract: ExtractConfig
+    vtt: VttConfig
+    tts: TtsConfig
+    video: VideoConfig
+    tg: TgConfig
+
+
+@dataclass(slots=True)
+class CommandResult:
+    ok: bool
+    command: str
+    provider: str
+    data: dict[str, Any] | None
+    error: dict[str, Any] | None
+    meta: dict[str, Any]
