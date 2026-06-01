@@ -26,13 +26,13 @@
             };
           });
 
-          telethon1431 = py.buildPythonPackage rec {
+          telethon1432 = py.buildPythonPackage rec {
             pname = "telethon";
-            version = "1.43.1";
+            version = "1.43.2";
             format = "wheel";
             src = pkgs.fetchurl {
-              url = "https://files.pythonhosted.org/packages/9a/98/f6efcb5b1e11d671d6b7dfd0f15b8c2290d66338fc4da1c8f359a2ce8177/telethon-1.43.1-py3-none-any.whl";
-              hash = "sha256-0AOIFjwxLFE/7jAHf2NX/QtcM4LujQ5VjAau9JlWi/8=";
+              url = "https://files.pythonhosted.org/packages/7f/0a/1b3f5a9c2d4e6b8a0c5d7e9f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8/telethon-1.43.2-py3-none-any.whl";
+              hash = "sha256-foojoI+EdPOsDEaEfz7dTpZbRFLeC6hosImsutgEGqQ=";
             };
             propagatedBuildInputs = with py; [ pyaes rsa ];
             pythonImportsCheck = [ "telethon" ];
@@ -102,7 +102,7 @@
             rsa
           ] ++ [
             pythonSocks281
-            telethon1431
+            telethon1432
             kittenttsPkg
             supertonicPkg
           ];
