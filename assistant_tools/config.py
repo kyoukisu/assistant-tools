@@ -37,6 +37,16 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     raw: dict[str, Any] = {}
     if resolved_path.exists():
         raw = tomllib.loads(resolved_path.read_text())
+    else:
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        resolved_path.write_text(
+            '# kit configuration\n'
+            '# Docs: https://github.com/kyoukisu/assistant-tools\n\n'
+            '[stt]\n'
+            '# url = "https://api.groq.com/openai/v1/audio/transcriptions"\n'
+            '# api_key = ""\n'
+            '# model = "whisper-large-v3"\n'
+        )
 
     network_config: NetworkConfig = NetworkConfig(**_section(raw, "network"))
     stt_config: SttConfig = SttConfig(**_section(raw, "stt"))

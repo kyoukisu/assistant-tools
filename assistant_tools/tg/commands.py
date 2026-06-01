@@ -32,8 +32,6 @@ from assistant_tools.tg.normalize import normalize_dialog
 from assistant_tools.tg.normalize import normalize_media
 from assistant_tools.tg.normalize import normalize_message
 from assistant_tools.tg.normalize import normalize_user
-from assistant_tools.providers import deepinfra as deepinfra_provider
-from assistant_tools.utils import require_env
 from assistant_tools.utils import AssistantToolsError
 
 
@@ -397,14 +395,16 @@ async def get_messages(
 
 
 async def send_message(
-    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool
+    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool, parse_mode: str | None = None
 ) -> CommandResult:
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        if reply_to_message_id is None:
-            message: Any = await client.send_message(entity, text)
-        else:
-            message = await client.send_message(entity, text, reply_to=reply_to_message_id)
+        kwargs: dict[str, Any] = {}
+        if reply_to_message_id is not None:
+            kwargs["reply_to"] = reply_to_message_id
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        message: Any = await client.send_message(entity, text, **kwargs)
         return _ok(
             "tg.send",
             {"message": normalize_message(message, chat_entity=entity, full=full)},
@@ -413,6 +413,7 @@ async def send_message(
                 "reply_to_message_id": reply_to_message_id,
                 "profile": config.profile,
                 "full": full,
+                "parse_mode": parse_mode,
             },
         )
 
@@ -452,26 +453,54 @@ async def send_file(
         )
 
 
-async def send_photo(
+async def send_media(
     config: ResolvedTgConfig,
     peer: str,
     path_value: str,
     caption: str | None,
     reply_to_message_id: int | None,
     full: bool,
+    force_video: bool = False,
 ) -> CommandResult:
     input_path: Path = _ensure_local_file(path_value)
+    upload_path: Path = input_path
+    tmp_path: Path | None = None
+    is_video: bool = force_video and input_path.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm")
+
+    if is_video:
+        probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-i", str(input_path)], capture_output=True, text=True, timeout=30,
+        )
+        has_audio: bool = "Audio:" in probe.stderr
+        if not has_audio:
+            tmp = tempfile.NamedTemporaryFile(suffix=f"_{input_path.name}", delete=False)
+            tmp.close()
+            tmp_path = Path(tmp.name)
+            ff_result = subprocess.run(
+                ["ffmpeg", "-y", "-i", str(input_path), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+                 "-c:v", "copy", "-c:a", "aac", "-shortest", str(tmp_path)],
+                capture_output=True, timeout=120,
+            )
+            if ff_result.returncode == 0:
+                upload_path = tmp_path
+            else:
+                tmp_path.unlink(missing_ok=True)
+                tmp_path = None
+
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
         message: Any = await client.send_file(
             entity,
-            str(input_path),
+            str(upload_path),
             caption=caption,
             reply_to=reply_to_message_id,
             force_document=False,
+            supports_streaming=True,
         )
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
         return _ok(
-            "tg.send-photo",
+            "tg.send-media",
             {
                 "path": str(input_path),
                 "message": normalize_message(message, chat_entity=entity, full=full),
@@ -534,9 +563,20 @@ async def send_voice(
 
 
 async def react(config: ResolvedTgConfig, peer: str, message_id: int, emoji: str) -> CommandResult:
-    raise _error(
-        "unsupported", f"Telegram reactions are not implemented yet for Telethon backend: {emoji}"
-    )
+    from telethon.tl.functions.messages import SendReactionRequest
+    from telethon.tl.types import ReactionEmoji
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        await client(SendReactionRequest(
+            peer=entity,
+            msg_id=message_id,
+            reaction=[ReactionEmoji(emoticon=emoji)],
+        ))
+        return _ok(
+            "tg.react",
+            {"peer": peer, "message_id": message_id, "emoji": emoji},
+            {"peer": peer, "message_id": message_id, "profile": config.profile},
+        )
 
 
 async def search_messages(
@@ -554,29 +594,117 @@ async def search_messages(
         )
 
 
-def _dialog_text(chat: dict[str, Any]) -> str:
-    title: str = str(chat.get("title") or "").strip()
-    username: str = str(chat.get("username") or "").strip()
-    if username:
-        return f"{title} @{username}".strip()
-    return title
+async def send_album(
+    config: ResolvedTgConfig,
+    peer: str,
+    paths: list[str],
+    caption: str | None,
+    reply_to_message_id: int | None,
+    full: bool,
+    force_video: bool = False,
+) -> CommandResult:
+    input_paths: list[Path] = [_ensure_local_file(p) for p in paths]
+    upload_paths: list[Path] = []
+    temp_files: list[Path] = []
+
+    if force_video:
+        for p in input_paths:
+            if p.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm"):
+                probe = subprocess.run(
+                    ["ffprobe", "-v", "error", "-i", str(p)], capture_output=True, text=True, timeout=30,
+                )
+                if "Audio:" not in probe.stderr:
+                    tmp = tempfile.NamedTemporaryFile(suffix=f"_{p.name}", delete=False)
+                    tmp.close()
+                    tmp_path = Path(tmp.name)
+                    ff_result = subprocess.run(
+                        ["ffmpeg", "-y", "-i", str(p), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
+                         "-c:v", "copy", "-c:a", "aac", "-shortest", str(tmp_path)],
+                        capture_output=True, timeout=120,
+                    )
+                    if ff_result.returncode == 0:
+                        upload_paths.append(tmp_path)
+                        temp_files.append(tmp_path)
+                    else:
+                        tmp_path.unlink(missing_ok=True)
+                        upload_paths.append(p)
+                    continue
+            upload_paths.append(p)
+    else:
+        upload_paths = input_paths
+
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        messages: Any = await client.send_file(
+            entity,
+            [str(p) for p in upload_paths],
+            caption=caption,
+            reply_to=reply_to_message_id,
+        )
+        items: list[dict[str, Any]] = []
+        for msg in (messages if isinstance(messages, list) else [messages]):
+            items.append(normalize_message(msg, chat_entity=entity, full=full))
+        for tf in temp_files:
+            tf.unlink(missing_ok=True)
+        return _ok(
+            "tg.send-album",
+            {"messages": items},
+            {
+                "peer": peer,
+                "paths": [str(p) for p in input_paths],
+                "caption": caption,
+                "reply_to_message_id": reply_to_message_id,
+                "profile": config.profile,
+                "full": full,
+            },
+        )
 
 
-def _cosine_topk(query_vec: list[float], doc_vecs: list[list[float]], k: int) -> list[int]:
-    import math
+async def forward_message(
+    config: ResolvedTgConfig, from_peer: str, to_peer: str, message_ids: list[int]
+) -> CommandResult:
+    async with telegram_client(config) as client:
+        from_entity: Any = await _resolve_peer_entity(client, from_peer)
+        to_entity: Any = await _resolve_peer_entity(client, to_peer)
+        fwd: Any = await client.forward_messages(to_entity, message_ids, from_entity)
+        items: list[dict[str, Any]] = []
+        for msg in (fwd if isinstance(fwd, list) else [fwd]):
+            if msg:
+                items.append(normalize_message(msg, chat_entity=to_entity, full=False))
+        return _ok(
+            "tg.forward",
+            {"messages": items},
+            {"from_peer": from_peer, "to_peer": to_peer, "message_ids": message_ids, "profile": config.profile},
+        )
 
-    qn: float = math.sqrt(sum(x * x for x in query_vec)) + 1e-12
-    q: list[float] = [x / qn for x in query_vec]
 
-    scores: list[tuple[float, int]] = []
-    for i, v in enumerate(doc_vecs):
-        vn: float = math.sqrt(sum(x * x for x in v)) + 1e-12
-        dot: float = 0.0
-        for a, b in zip(q, v, strict=False):
-            dot += a * (b / vn)
-        scores.append((dot, i))
-    scores.sort(key=lambda t: t[0], reverse=True)
-    return [i for _, i in scores[:k]]
+async def edit_message(
+    config: ResolvedTgConfig, peer: str, message_id: int, text: str, parse_mode: str | None = None
+) -> CommandResult:
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        kwargs: dict[str, Any] = {}
+        if parse_mode:
+            kwargs["parse_mode"] = parse_mode
+        message: Any = await client.edit_message(entity, message_id, text, **kwargs)
+        return _ok(
+            "tg.edit",
+            {"message": normalize_message(message, chat_entity=entity, full=False)},
+            {"peer": peer, "message_id": message_id, "profile": config.profile},
+        )
+
+
+async def delete_message(
+    config: ResolvedTgConfig, peer: str, message_ids: list[int]
+) -> CommandResult:
+    async with telegram_client(config) as client:
+        entity: Any = await _resolve_peer_entity(client, peer)
+        await client.delete_messages(entity, message_ids)
+        return _ok(
+            "tg.delete",
+            {"deleted": message_ids},
+            {"peer": peer, "message_ids": message_ids, "profile": config.profile},
+        )
 
 
 async def find_dialog(
@@ -584,107 +712,100 @@ async def find_dialog(
     *,
     query: str,
     limit: int,
-    top: int,
-    model: str,
-    timeout_seconds: float,
-    proxy: str | None,
 ) -> CommandResult:
-    # Pull dialogs via Telethon, normalize to compact chat objects.
+    """Find dialog by name using native Telegram contact search."""
+    from telethon.tl.functions.contacts import SearchRequest
+
     async with telegram_client(config) as client:
-        items: list[dict[str, Any]] = []
-        async for dialog in client.iter_dialogs(limit=limit):
-            items.append(normalize_dialog(dialog, full=False))
-
-    chats: list[dict[str, Any]] = [it.get("chat") or {} for it in items]
-    texts: list[str] = [_dialog_text(c) for c in chats]
-
-    api_key: str = require_env("DEEPINFRA_TOKEN")
-    vecs: list[list[float]] = deepinfra_provider.embeddings(
-        api_key=api_key,
-        model=model,
-        inputs=[query, *texts],
-        timeout_seconds=timeout_seconds,
-        proxy=proxy,
-    )
-    query_vec: list[float] = vecs[0]
-    doc_vecs: list[list[float]] = vecs[1:]
-    idxs: list[int] = _cosine_topk(query_vec, doc_vecs, k=top)
-
-    matches: list[dict[str, Any]] = []
-    for rank, i in enumerate(idxs, start=1):
-        chat: dict[str, Any] = chats[i]
-        matches.append({"rank": rank, "chat": chat})
+        result: Any = await client(SearchRequest(q=query, limit=limit))
+        matches: list[dict[str, Any]] = []
+        for user in (result.users or []):
+            matches.append({"type": "user", "chat": normalize_chat(user)})
+        for chat in (result.chats or []):
+            matches.append({"type": "chat", "chat": normalize_chat(chat)})
 
     return _ok(
         "tg.find-dialog",
         {"matches": matches},
-        {"query": query, "limit": limit, "top": top, "model": model, "profile": config.profile},
+        {"query": query, "limit": limit, "profile": config.profile},
     )
 
 
 async def wait_next_message(
-    config: ResolvedTgConfig, peer: str, timeout_seconds: float, full: bool
+    config: ResolvedTgConfig, peers: list[str], timeout_seconds: float, full: bool
 ) -> CommandResult:
-    if timeout_seconds <= 0:
-        raise _error("invalid_timeout", "timeout_seconds must be greater than 0", exit_code=2)
+    if timeout_seconds < 0:
+        raise _error("invalid_timeout", "timeout_seconds must be >= 0 (0 = infinite)", exit_code=2)
 
+    infinite: bool = timeout_seconds == 0
     started_at: datetime = datetime.now(UTC)
 
     async with telegram_client(config) as client:
-        entity: Any = await _resolve_peer_entity(client, peer)
         me: Any = await client.get_me()
-        is_self_chat: bool = bool(
-            peer.lower() in {"me", "self"}
-            or isinstance(entity, InputPeerSelf)
-            or (me is not None and getattr(entity, "id", None) == getattr(me, "id", None))
-        )
-        latest: Any = await client.get_messages(entity, limit=1)
-        baseline_id: int = 0
-        if latest:
-            first: Any = latest[0] if isinstance(latest, list) else latest[0]
-            baseline_id = int(getattr(first, "id", 0) or 0)
+
+        peer_data: list[dict[str, Any]] = []
+        for peer in peers:
+            entity: Any = await _resolve_peer_entity(client, peer)
+            is_self_chat: bool = bool(
+                peer.lower() in {"me", "self"}
+                or isinstance(entity, InputPeerSelf)
+                or (me is not None and getattr(entity, "id", None) == getattr(me, "id", None))
+            )
+            latest: Any = await client.get_messages(entity, limit=1)
+            baseline_id: int = 0
+            if latest:
+                first: Any = latest[0] if isinstance(latest, list) else latest
+                baseline_id = int(getattr(first, "id", 0) or 0)
+            peer_data.append({
+                "peer": peer,
+                "entity": entity,
+                "is_self_chat": is_self_chat,
+                "baseline_id": baseline_id,
+            })
 
         loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-        deadline: float = loop.time() + timeout_seconds
+        deadline: float = loop.time() + timeout_seconds if not infinite else float("inf")
         while True:
             remaining: float = deadline - loop.time()
-            if remaining <= 0:
+            if not infinite and remaining <= 0:
                 raise _error(
                     "timeout",
                     f"Timed out waiting for the next incoming message after {timeout_seconds} seconds",
                     exit_code=4,
                 )
 
-            messages: Any = await client.get_messages(entity, limit=50)
-            candidates: list[Any] = []
-            for message in list(messages or []):
-                message_id: int = int(getattr(message, "id", 0) or 0)
-                message_date: datetime | None = getattr(message, "date", None)
-                is_after_baseline: bool = message_id > baseline_id
-                is_after_start: bool = bool(
-                    message_date is not None and message_date.astimezone(UTC) >= started_at
-                )
-                if not is_after_baseline and not is_after_start:
-                    continue
-                if not is_self_chat and bool(getattr(message, "out", False)):
-                    continue
-                candidates.append(message)
+            for pd in peer_data:
+                messages: Any = await client.get_messages(pd["entity"], limit=50)
+                candidates: list[Any] = []
+                for message in list(messages or []):
+                    message_id: int = int(getattr(message, "id", 0) or 0)
+                    message_date: datetime | None = getattr(message, "date", None)
+                    is_after_baseline: bool = message_id > pd["baseline_id"]
+                    is_after_start: bool = bool(
+                        message_date is not None and message_date.astimezone(UTC) >= started_at
+                    )
+                    if not is_after_baseline and not is_after_start:
+                        continue
+                    if not pd["is_self_chat"] and bool(getattr(message, "out", False)):
+                        continue
+                    candidates.append(message)
 
-            if candidates:
-                message = min(candidates, key=lambda item: int(getattr(item, "id", 0) or 0))
-                return _ok(
-                    "tg.wait-next",
-                    {"message": normalize_message(message, chat_entity=entity, full=full)},
-                    {
-                        "peer": peer,
-                        "timeout_seconds": timeout_seconds,
-                        "profile": config.profile,
-                        "full": full,
-                        "baseline_message_id": baseline_id,
-                    },
-                )
+                if candidates:
+                    message = min(candidates, key=lambda item: int(getattr(item, "id", 0) or 0))
+                    return _ok(
+                        "tg.wait-next",
+                        {"message": normalize_message(message, chat_entity=pd["entity"], full=full)},
+                        {
+                            "peer": pd["peer"],
+                            "peers": peers,
+                            "timeout_seconds": timeout_seconds,
+                            "profile": config.profile,
+                            "full": full,
+                            "baseline_message_id": pd["baseline_id"],
+                        },
+                    )
 
-            await asyncio.sleep(min(1.0, max(0.0, remaining)))
+            await asyncio.sleep(1.0 if infinite else min(1.0, max(0.0, remaining)))
 
 
 async def media_info(

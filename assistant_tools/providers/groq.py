@@ -42,6 +42,7 @@ def transcribe(
     temperature: float,
     prompt: str,
     proxy: str | None,
+    url: str | None = None,
 ) -> dict[str, Any]:
     data: dict[str, Any] = {
         "model": model,
@@ -58,12 +59,13 @@ def transcribe(
     elif timestamps == "word":
         data["timestamp_granularities[]"] = "word"
 
+    endpoint: str = url or f"{GROQ_BASE_URL}/audio/transcriptions"
     headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
     with build_client(timeout_seconds, proxy) as client:
         if source.startswith("http://") or source.startswith("https://"):
             data["url"] = source
             response = client.post(
-                f"{GROQ_BASE_URL}/audio/transcriptions",
+                endpoint,
                 headers=headers,
                 data=data,
             )
@@ -74,7 +76,7 @@ def transcribe(
             upload_name, content_type = upload_file_metadata(path)
             with path.open("rb") as file_handle:
                 response = client.post(
-                    f"{GROQ_BASE_URL}/audio/transcriptions",
+                    endpoint,
                     headers=headers,
                     data=data,
                     files={"file": (upload_name, file_handle, content_type)},

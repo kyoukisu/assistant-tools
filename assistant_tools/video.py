@@ -368,10 +368,12 @@ def transcribe_audio(
     temperature: float,
     prompt: str,
     proxy: str | None,
+    api_key: str = "",
+    url: str | None = None,
 ) -> dict[str, Any]:
-    api_key: str = require_env("GROQ_API_KEY")
+    resolved_api_key: str = api_key or require_env("GROQ_API_KEY")
     return groq_provider.transcribe(
-        api_key=api_key,
+        api_key=resolved_api_key,
         source=str(audio_path),
         timeout_seconds=timeout_seconds,
         model=model,
@@ -380,6 +382,7 @@ def transcribe_audio(
         temperature=temperature,
         prompt=prompt,
         proxy=proxy,
+        url=url,
     )
 
 
@@ -429,6 +432,8 @@ def analyze_local_video(
     temperature: float,
     prompt: str,
     proxy: str | None,
+    api_key: str = "",
+    url: str | None = None,
 ) -> dict[str, Any]:
     input_path: Path = ensure_path_exists(source)
     probe: MediaProbe = probe_media(input_path)
@@ -456,6 +461,8 @@ def analyze_local_video(
             temperature=temperature,
             prompt=prompt,
             proxy=proxy,
+            api_key=api_key,
+            url=url,
         )
 
     transcript_segments: list[TranscriptSegment] = extract_transcript_segments(transcript_payload)

@@ -174,6 +174,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="paplay volume for --play (PulseAudio scale, e.g. 45000)",
     )
 
+    config_parser = subparsers.add_parser("config", help="Show or edit kit configuration")
+    config_subparsers = config_parser.add_subparsers(dest="config_command")
+    config_subparsers.add_parser("show", help="Show current config")
+    config_set = config_subparsers.add_parser("set", help="Set a config value")
+    config_set.add_argument("key", help="Config key (e.g. stt.api_key)")
+    config_set.add_argument("value", help="Value to set")
+    config_subparsers.add_parser("path", help="Show config file path")
+
     tg_parser = subparsers.add_parser("tg", help="Telegram CLI via Telethon")
     tg_parser.add_argument(
         "--profile",
@@ -218,6 +226,7 @@ def build_parser() -> argparse.ArgumentParser:
     tg_send.add_argument("peer", help="Target peer")
     tg_send.add_argument("text", help="Message text")
     tg_send.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode: md or html")
     tg_send.add_argument("--full", action="store_true", help="Return fuller sent message object")
 
     tg_send_file = tg_subparsers.add_parser("send-file", help="Send local file as document")
@@ -229,15 +238,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--full", action="store_true", help="Return fuller sent message object"
     )
 
-    tg_send_photo = tg_subparsers.add_parser(
-        "send-photo", help="Send local image as Telegram photo"
+    tg_send_media = tg_subparsers.add_parser(
+        "send-media", aliases=["send-photo"], help="Send local media as Telegram photo/video (multiple = album)"
     )
-    tg_send_photo.add_argument("peer", help="Target peer")
-    tg_send_photo.add_argument("path", help="Local image path")
-    tg_send_photo.add_argument("--caption", default=None, help="Optional caption")
-    tg_send_photo.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
-    tg_send_photo.add_argument(
+    tg_send_media.add_argument("peer", help="Target peer")
+    tg_send_media.add_argument("path", nargs="+", help="Local image/video path(s)")
+    tg_send_media.add_argument("--caption", default=None, help="Optional caption")
+    tg_send_media.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
+    tg_send_media.add_argument(
         "--full", action="store_true", help="Return fuller sent message object"
+    )
+    tg_send_media.add_argument(
+        "--as-gif", action="store_true", help="Send video as GIF/animation (no sound, autoplay)"
     )
 
     tg_send_voice = tg_subparsers.add_parser(
@@ -283,12 +295,12 @@ def build_parser() -> argparse.ArgumentParser:
     tg_search.add_argument("--full", action="store_true", help="Return fuller message objects")
 
     tg_wait_next = tg_subparsers.add_parser("wait-next", help="Wait for the next incoming message")
-    tg_wait_next.add_argument("peer", help="Target peer")
+    tg_wait_next.add_argument("peer", nargs="+", help="Target peer(s) — one or more")
     tg_wait_next.add_argument(
-        "--timeout-seconds",
+        "--timeout", "--timeout-seconds",
         type=float,
-        required=True,
-        help="How long to wait before timing out",
+        default=0,
+        help="Seconds to wait (0 = infinite)",
     )
     tg_wait_next.add_argument("--full", action="store_true", help="Return fuller message object")
 
@@ -311,17 +323,31 @@ def build_parser() -> argparse.ArgumentParser:
     tg_copy.add_argument("target_peer", help="Target peer")
     tg_copy.add_argument("--full", action="store_true", help="Return fuller copied message object")
 
+    tg_forward = tg_subparsers.add_parser("forward", help="Forward message(s) to another chat")
+    tg_forward.add_argument("from_peer", help="Source peer")
+    tg_forward.add_argument("to_peer", help="Destination peer")
+    tg_forward.add_argument("message_ids", nargs="+", type=int, help="Message IDs to forward")
+
+    tg_edit = tg_subparsers.add_parser("edit", help="Edit a message")
+    tg_edit.add_argument("peer", help="Target peer")
+    tg_edit.add_argument("message_id", type=int, help="Message ID to edit")
+    tg_edit.add_argument("text", help="New text")
+    tg_edit.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode")
+
+    tg_delete = tg_subparsers.add_parser("delete", help="Delete message(s)")
+    tg_delete.add_argument("peer", help="Target peer")
+    tg_delete.add_argument("message_ids", nargs="+", type=int, help="Message IDs to delete")
+
+    tg_stt = tg_subparsers.add_parser("stt", help="Download voice/audio message and transcribe")
+    tg_stt.add_argument("peer", help="Target peer")
+    tg_stt.add_argument("message_id", type=int, help="Message id with voice/audio")
+    tg_stt.add_argument("--language", default="", help="Language hint (e.g. ru, en)")
+
     tg_find_dialog = tg_subparsers.add_parser(
-        "find-dialog", help="Find dialog by title/username (DeepInfra embeddings)"
+        "find-dialog", help="Find people and chats by name (Telegram search)"
     )
-    tg_find_dialog.add_argument("query", help="Query string")
-    tg_find_dialog.add_argument("--limit", type=int, default=400, help="Dialogs to scan")
-    tg_find_dialog.add_argument("--top", type=int, default=10, help="Top matches to return")
-    tg_find_dialog.add_argument(
-        "--model",
-        default="BAAI/bge-m3-multi",
-        help="DeepInfra embeddings model name",
-    )
+    tg_find_dialog.add_argument("query", help="Search query (name, username, title)")
+    tg_find_dialog.add_argument("--limit", type=int, default=20, help="Max results to return")
 
     return parser
 
@@ -341,7 +367,7 @@ def run_stt(
     source: str = str(args.input)
     if not is_url(source):
         ensure_path_exists(source)
-    api_key: str = require_env("GROQ_API_KEY")
+    api_key: str = config.stt.api_key or require_env("GROQ_API_KEY")
     model: str = args.model or config.stt.model
     language: str = args.language if args.language is not None else config.stt.language
     timestamps: str = args.timestamps if args.timestamps is not None else config.stt.timestamps
@@ -357,6 +383,7 @@ def run_stt(
         temperature=config.stt.temperature,
         prompt=prompt,
         proxy=config.network.proxy or None,
+        url=config.stt.url or None,
     )
     return CommandResult(
         ok=True,
@@ -544,6 +571,8 @@ def run_video(
         temperature=config.stt.temperature,
         prompt=prompt,
         proxy=config.network.proxy or None,
+        api_key=config.stt.api_key or "",
+        url=config.stt.url or None,
     )
     return CommandResult(
         ok=True,
@@ -692,6 +721,79 @@ def run_tg_speak(
     )
 
 
+def _toml_value(val: str) -> str:
+    """Format a string value for TOML config."""
+    if val.lower() in ("true", "false"):
+        return val.lower()
+    try:
+        int(val)
+        return val
+    except ValueError:
+        pass
+    try:
+        float(val)
+        return val
+    except ValueError:
+        pass
+    return f"'{val}'"
+
+
+_VIDEO_EXTENSIONS: set[str] = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", ".wmv", ".m4v"}
+
+
+def _validate_video_if_needed(path: str) -> None:
+    """Run ffprobe on video files to catch corrupted files before sending."""
+    import subprocess as _subprocess
+    p = Path(path)
+    if p.suffix.lower() not in _VIDEO_EXTENSIONS:
+        return
+    if not p.exists():
+        raise AssistantToolsError(f"File not found: {path}", error_type="file_not_found")
+    result = _subprocess.run(
+        ["ffprobe", "-v", "error", "-i", path, "-f", "null", "-"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise AssistantToolsError(
+            f"Video file appears corrupted or invalid: {path}\n{result.stderr.strip()}",
+            error_type="invalid_video",
+        )
+
+
+def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
+    """Download voice/audio message and transcribe."""
+    import shutil
+
+    download_result: CommandResult = tg_commands.run(
+        tg_commands.media_download(tg_config, args.peer, args.message_id, None, False)
+    )
+    if not download_result.ok:
+        return download_result
+    dl_data: dict[str, Any] = download_result.data or {}
+    dl_path: str = dl_data.get("path", "")
+    if not dl_path:
+        return CommandResult(
+            ok=False, command="tg.stt", provider="groq", data=None,
+            error={"type": "no_media", "message": "Message has no downloadable media"}, meta={},
+        )
+    # Rename to .ogg for whisper compatibility
+    ogg_path: str = dl_path if dl_path.endswith(".ogg") else f"{dl_path.rsplit('.', 1)[0]}.ogg"
+    if ogg_path != dl_path:
+        shutil.copy2(dl_path, ogg_path)
+    api_key: str = config.stt.api_key or require_env("GROQ_API_KEY")
+    result_data: dict[str, Any] = groq_provider.transcribe(
+        source=ogg_path, api_key=api_key, model=config.stt.model,
+        language=args.language or "", url=config.stt.url,
+        timeout_seconds=60, timestamps="none", temperature=0.0, prompt="", proxy=None,
+    )
+    text: str = result_data.get("text", "")
+    return CommandResult(
+        ok=True, command="tg.stt", provider="groq",
+        data={"text": text, "source_path": dl_path, "message_id": args.message_id},
+        error=None, meta={"peer": args.peer, "model": config.stt.model},
+    )
+
+
 def dispatch(
     args: argparse.Namespace, config: AppConfig, config_path: Path | None
 ) -> CommandResult:
@@ -708,8 +810,64 @@ def dispatch(
         return run_video(args, config, verbose, config_path)
     if args.command == "tts":
         return run_tts(args, config, verbose, config_path)
+    if args.command == "config":
+        from assistant_tools.config import DEFAULT_CONFIG_PATH
+        config_path_resolved: Path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
+        cmd: str = getattr(args, "config_command", "show") or "show"
+        if cmd == "show":
+            if config_path_resolved.exists():
+                print(config_path_resolved.read_text())
+            else:
+                print(f"No config file at {config_path_resolved}")
+            return CommandResult(ok=True, command="config.show", provider="local", data={}, error=None, meta={"path": str(config_path_resolved)})
+        if cmd == "path":
+            print(str(config_path_resolved))
+            return CommandResult(ok=True, command="config.path", provider="local", data={"path": str(config_path_resolved)}, error=None, meta={})
+        if cmd == "set":
+            import re as _re
+            content: str = config_path_resolved.read_text() if config_path_resolved.exists() else ""
+            section: str
+            sep: str
+            key: str
+            section, sep, key = args.key.rpartition(".")
+            if not sep:
+                section, key = "default", args.key
+            lines: list[str] = content.splitlines(keepends=True)
+            in_section: bool = False
+            replaced: bool = False
+            section_found: bool = False
+            for i, line in enumerate(lines):
+                stripped: str = line.strip()
+                if stripped == f"[{section}]":
+                    in_section = True
+                    section_found = True
+                    continue
+                if stripped.startswith("[") and stripped.endswith("]"):
+                    if in_section and not replaced:
+                        lines.insert(i, f"{key} = {_toml_value(args.value)}\n")
+                        replaced = True
+                    in_section = False
+                    continue
+                if in_section and _re.match(rf"^{_re.escape(key)}\s*=", stripped):
+                    lines[i] = f"{key} = {_toml_value(args.value)}\n"
+                    replaced = True
+            if not replaced:
+                if not section_found:
+                    lines.append(f"\n[{section}]\n")
+                lines.append(f"{key} = {_toml_value(args.value)}\n")
+            content = "".join(lines)
+            config_path_resolved.parent.mkdir(parents=True, exist_ok=True)
+            config_path_resolved.write_text(content)
+            print(f"Set {args.key} = {args.value}")
+            return CommandResult(ok=True, command="config.set", provider="local", data={"key": args.key, "value": args.value}, error=None, meta={})
     if args.command == "tg":
         tg_config = resolve_tg_config(config, args.profile)
+
+        # Validate video files before send-media (catches corrupted files early)
+        if args.tg_command in ("send-media", "send-photo", "send-file"):
+            _vpaths: list[str] = [str(p) for p in args.path] if args.tg_command != "send-file" else [str(args.path)]  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportUnknownVariableType]
+            for p in _vpaths:
+                _validate_video_if_needed(p)
         if args.tg_command == "auth":
             if args.tg_auth_command == "login":
                 return tg_commands.run(tg_commands.auth_login(tg_config, args.phone))
@@ -731,10 +889,6 @@ def dispatch(
                     tg_config,
                     query=str(args.query),
                     limit=int(args.limit),
-                    top=int(args.top),
-                    model=str(args.model),
-                    timeout_seconds=float(config.network.timeout_seconds),
-                    proxy=(config.network.proxy or None),
                 )
             )
         if args.tg_command == "dialogs":
@@ -751,7 +905,7 @@ def dispatch(
             )
         if args.tg_command == "send":
             return tg_commands.run(
-                tg_commands.send_message(tg_config, args.peer, args.text, args.reply_to, args.full)
+                tg_commands.send_message(tg_config, args.peer, args.text, args.reply_to, args.full, args.parse_mode)
             )
         if args.tg_command == "send-file":
             return tg_commands.run(
@@ -759,12 +913,24 @@ def dispatch(
                     tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
                 )
             )
-        if args.tg_command == "send-photo":
-            return tg_commands.run(
-                tg_commands.send_photo(
-                    tg_config, args.peer, str(args.path), args.caption, args.reply_to, args.full
+        if args.tg_command in ("send-media", "send-photo"):
+            _paths: list[str] = [str(p) for p in args.path]  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportUnknownVariableType]
+            if len(_paths) == 1:
+                as_gif: bool = getattr(args, "as_gif", False)
+                return tg_commands.run(
+                    tg_commands.send_media(
+                        tg_config, args.peer, _paths[0], args.caption, args.reply_to, args.full,
+                        force_video=not as_gif,
+                    )
                 )
-            )
+            else:
+                as_gif = getattr(args, "as_gif", False)
+                return tg_commands.run(
+                    tg_commands.send_album(
+                        tg_config, args.peer, _paths, args.caption, args.reply_to, args.full,
+                        force_video=not as_gif,
+                    )
+                )
         if args.tg_command == "send-voice":
             return tg_commands.run(
                 tg_commands.send_voice(
@@ -785,8 +951,8 @@ def dispatch(
             return tg_commands.run(
                 tg_commands.wait_next_message(
                     tg_config,
-                    args.peer,
-                    float(args.timeout_seconds),
+                    list(args.peer),
+                    float(args.timeout),
                     args.full,
                 )
             )
@@ -806,6 +972,20 @@ def dispatch(
                     tg_config, args.source_peer, args.message_id, args.target_peer, args.full
                 )
             )
+        if args.tg_command == "forward":
+            return tg_commands.run(
+                tg_commands.forward_message(tg_config, args.from_peer, args.to_peer, list(args.message_ids))
+            )
+        if args.tg_command == "edit":
+            return tg_commands.run(
+                tg_commands.edit_message(tg_config, args.peer, args.message_id, args.text, args.parse_mode)
+            )
+        if args.tg_command == "delete":
+            return tg_commands.run(
+                tg_commands.delete_message(tg_config, args.peer, list(args.message_ids))
+            )
+        if args.tg_command == "stt":
+            return _run_tg_stt(args, config, tg_config)
     raise AssistantToolsError(
         f"Unknown command: {args.command}",
         error_type="unknown_command",
