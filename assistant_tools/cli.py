@@ -887,6 +887,19 @@ def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
     elif cmd == "react":
         request = {"cmd": "react", "peer": args.peer, "message_id": args.message_id,
                    "emoji": args.emoji}
+    elif cmd == "send-voice":
+        request = {"cmd": "send_voice", "peer": args.peer, "path": str(args.path),
+                   "caption": args.caption, "reply_to": args.reply_to, "full": args.full}
+    elif cmd == "search":
+        request = {"cmd": "search", "peer": args.peer, "query": args.query,
+                   "limit": args.limit, "full": args.full}
+    elif cmd == "media-download":
+        request = {"cmd": "media_download", "peer": args.peer,
+                   "message_ids": list(args.message_ids),
+                   "output_dir": args.output_dir, "full": args.full}
+    elif cmd == "media-info":
+        request = {"cmd": "media_info", "peer": args.peer,
+                   "message_id": args.message_id, "full": args.full}
     elif cmd == "wait-next":
         request = {"cmd": "wait_next", "peers": list(args.peer),
                    "timeout": float(args.timeout)}
@@ -986,7 +999,7 @@ def dispatch(
             return CommandResult(ok=True, command="tg._daemon", provider="telethon", data={}, error=None, meta={})
 
         # Daemon middleware: transparently proxies supported commands
-        if args.tg_command not in ("auth", "speak", "media-info", "media-download", "copy", "send-voice", "search", "stt", "participants"):
+        if args.tg_command not in ("auth", "speak", "copy", "stt", "participants"):
             result: CommandResult | None = _daemon_middleware(args, tg_config)
             if result is not None:
                 return result

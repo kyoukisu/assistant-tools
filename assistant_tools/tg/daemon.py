@@ -144,6 +144,35 @@ async def handle_client(
             )
             result = {"ok": r.ok, "data": r.data, "error": r.error}
 
+        elif cmd == "send_voice":
+            r = await _cmds.send_voice(
+                tg_config, request["peer"], request["path"],
+                request.get("caption"), request.get("reply_to"),
+                request.get("full", False),
+            )
+            result = {"ok": r.ok, "data": r.data, "error": r.error}
+
+        elif cmd == "search":
+            r = await _cmds.search_messages(
+                tg_config, request["peer"], request["query"],
+                request.get("limit", 20), request.get("full", False),
+            )
+            result = {"ok": r.ok, "data": r.data, "error": r.error}
+
+        elif cmd == "media_download":
+            r = await _cmds.media_download(
+                tg_config, request["peer"], request.get("message_ids", []),
+                request.get("output_dir"), request.get("full", False),
+            )
+            result = {"ok": r.ok, "data": r.data, "error": r.error}
+
+        elif cmd == "media_info":
+            r = await _cmds.media_info(
+                tg_config, request["peer"], request["message_id"],
+                request.get("full", False),
+            )
+            result = {"ok": r.ok, "data": r.data, "error": r.error}
+
         elif cmd == "react":
             r = await _cmds.react(
                 tg_config, request["peer"],
