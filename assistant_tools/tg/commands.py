@@ -834,35 +834,39 @@ async def media_info(
 
 
 async def media_download(
-    config: ResolvedTgConfig, peer: str, message_id: int, output_dir: str | None, full: bool
+    config: ResolvedTgConfig, peer: str, message_ids: list[int], output_dir: str | None, full: bool
 ) -> CommandResult:
     target_dir: Path = Path(output_dir).expanduser() if output_dir else config.download_dir
     target_dir.mkdir(parents=True, exist_ok=True)
 
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        message: Any = await client.get_messages(entity, ids=message_id)
-        if not message:
-            raise _error("not_found", "Message not found")
-        media: dict[str, Any] | None = normalize_media(message)
-        if media is None:
-            raise _error("not_found", "Message has no media")
-        downloaded_any: Any = await client.download_media(message, file=str(target_dir))
-        downloaded: str | None = downloaded_any if isinstance(downloaded_any, str) else None
-        data: dict[str, Any] = {
-            "path": str(Path(downloaded).expanduser().resolve()) if downloaded else None,
-            "message_id": message_id,
-            "chat": normalize_chat(entity),
-            "media": media,
-        }
-        if full:
-            data["message"] = normalize_message(message, chat_entity=entity, full=True)
+        results: list[dict[str, Any]] = []
+        for mid in message_ids:
+            message: Any = await client.get_messages(entity, ids=mid)
+            if not message:
+                results.append({"message_id": mid, "error": "not_found"})
+                continue
+            media: dict[str, Any] | None = normalize_media(message)
+            if media is None:
+                results.append({"message_id": mid, "error": "no_media"})
+                continue
+            downloaded_any: Any = await client.download_media(message, file=str(target_dir))
+            downloaded: str | None = downloaded_any if isinstance(downloaded_any, str) else None
+            entry: dict[str, Any] = {
+                "path": str(Path(downloaded).expanduser().resolve()) if downloaded else None,
+                "message_id": mid,
+                "media": media,
+            }
+            if full:
+                entry["message"] = normalize_message(message, chat_entity=entity, full=True)
+            results.append(entry)
         return _ok(
             "tg.media-download",
-            data,
+            {"items": results, "chat": normalize_chat(entity)},
             {
                 "peer": peer,
-                "message_id": message_id,
+                "message_ids": message_ids,
                 "output_dir": str(target_dir),
                 "profile": config.profile,
                 "full": full,

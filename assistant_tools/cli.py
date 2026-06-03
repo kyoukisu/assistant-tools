@@ -313,7 +313,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     tg_media_download = tg_subparsers.add_parser("media-download", help="Download message media")
     tg_media_download.add_argument("peer", help="Target peer")
-    tg_media_download.add_argument("message_id", type=int, help="Message id")
+    tg_media_download.add_argument("message_ids", nargs="+", type=int, help="Message ids")
     tg_media_download.add_argument("--output-dir", default=None, help="Output directory override")
     tg_media_download.add_argument(
         "--full", action="store_true", help="Include full message object"
@@ -1091,7 +1091,7 @@ def dispatch(
         if args.tg_command == "media-download":
             return tg_commands.run(
                 tg_commands.media_download(
-                    tg_config, args.peer, args.message_id, args.output_dir, args.full
+                    tg_config, args.peer, list(args.message_ids), args.output_dir, args.full
                 )
             )
         if args.tg_command == "copy":
