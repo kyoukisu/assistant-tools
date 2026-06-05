@@ -314,6 +314,9 @@ async def run_daemon(tg_config: ResolvedTgConfig) -> None:
     from dataclasses import replace
     daemon_config: ResolvedTgConfig = replace(tg_config, session_file=daemon_session)
 
+    # Remove stale socket from previous run BEFORE connect
+    SOCKET_PATH.unlink(missing_ok=True)
+
     # Create and connect client
     client: TelegramClient = make_client(daemon_config, receive_updates=True)
     await client.connect()
@@ -327,10 +330,6 @@ async def run_daemon(tg_config: ResolvedTgConfig) -> None:
     @client.on(events.NewMessage(incoming=True))
     async def _handler(event: Any) -> None:
         await _on_new_message(event)
-
-    # Remove stale socket
-    if SOCKET_PATH.exists():
-        SOCKET_PATH.unlink()
 
     server: asyncio.AbstractServer = await asyncio.start_unix_server(
         lambda r, w: handle_client(r, w, tg_config),

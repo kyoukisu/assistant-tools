@@ -913,6 +913,15 @@ def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
     if not resp.get("ok") and resp.get("error") == "daemon not running (no socket)":
         return None  # Socket disappeared — fall through
 
+    # Stale socket: daemon process dead but socket file remains (Connection refused)
+    if not resp.get("ok") and "Connection refused" in str(resp.get("error", "")):
+        _SOCK.unlink(missing_ok=True)
+        _ensure_daemon(tg_config)
+        if _SOCK.exists():
+            resp = _asyncio.run(_daemon_request(request))
+        else:
+            return None  # Still can't start daemon, fall through
+
     return CommandResult(
         ok=resp.get("ok", False),
         command=f"tg.{cmd}",
