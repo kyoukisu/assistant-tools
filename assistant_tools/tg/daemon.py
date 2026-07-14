@@ -4,14 +4,16 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import os
 import shutil
-import signal
 import tempfile
 import time as _time
+import traceback
 from pathlib import Path
 from typing import Any
+from typing import TextIO
 
 from telethon import TelegramClient
 
@@ -22,6 +24,7 @@ from assistant_tools.tg.client import make_client
 from assistant_tools.tg.config import ResolvedTgConfig
 
 SOCKET_PATH: Path = Path(tempfile.gettempdir()) / "kit-tg-daemon.sock"
+LOCK_PATH: Path = Path(tempfile.gettempdir()) / "kit-tg-daemon.lock"
 IDLE_TIMEOUT: float = 600.0  # 10 minutes
 
 _last_activity: float = 0.0
@@ -32,6 +35,21 @@ _waiters: list[tuple[asyncio.Event, list[int], list[dict[str, Any] | None]]] = [
 def _touch() -> None:
     global _last_activity
     _last_activity = _time.time()
+
+
+def _acquire_daemon_lock(path: Path = LOCK_PATH) -> TextIO | None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_file = path.open("a+", encoding="utf-8")
+    try:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        lock_file.close()
+        return None
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write(str(os.getpid()))
+    lock_file.flush()
+    return lock_file
 
 
 def _peer_id_from_event(event: Any) -> int:
@@ -53,6 +71,7 @@ async def handle_client(
     reader: asyncio.StreamReader,
     writer: asyncio.StreamWriter,
     tg_config: ResolvedTgConfig,
+    shutdown_event: asyncio.Event | None = None,
 ) -> None:
     _touch()
     try:
@@ -65,12 +84,9 @@ async def handle_client(
             result = {"ok": True, "data": "pong"}
 
         elif cmd == "shutdown":
-            writer.write(json.dumps({"ok": True, "data": "shutting down"}, ensure_ascii=False).encode())
-            await writer.drain()
-            writer.close()
-            await writer.wait_closed()
-            os.kill(os.getpid(), signal.SIGTERM)
-            return
+            result = {"ok": True, "data": "shutting down"}
+            if shutdown_event is not None:
+                shutdown_event.set()
 
         elif cmd == "send":
             r = await _cmds.send_message(
@@ -195,6 +211,7 @@ async def handle_client(
         writer.write(json.dumps(result, ensure_ascii=False).encode() + b"\n")
         await writer.drain()
     except Exception as exc:
+        traceback.print_exc()
         try:
             err_resp: dict[str, Any] = {"ok": False, "error": str(exc)}
             writer.write(json.dumps(err_resp, ensure_ascii=False).encode() + b"\n")
@@ -306,60 +323,78 @@ async def _on_new_message(event: Any) -> None:
 
 async def run_daemon(tg_config: ResolvedTgConfig) -> None:
     """Start the daemon: connect, register handlers, serve Unix socket."""
-    # Copy session file so daemon doesn't conflict with direct connections
-    daemon_session: Path = tg_config.session_file.parent / f"{tg_config.profile}_daemon.session"
-    if tg_config.session_file.exists():
-        shutil.copy2(str(tg_config.session_file), str(daemon_session))
+    lock_file = _acquire_daemon_lock()
+    if lock_file is None:
+        print("kit tg daemon already running", flush=True)
+        return
 
-    from dataclasses import replace
-    daemon_config: ResolvedTgConfig = replace(tg_config, session_file=daemon_session)
+    client: TelegramClient | None = None
+    server: asyncio.AbstractServer | None = None
+    shutdown_event = asyncio.Event()
+    try:
+        # Only the singleton lock owner may replace the daemon session or socket.
+        daemon_session: Path = (
+            tg_config.session_file.parent / f"{tg_config.profile}_daemon.session"
+        )
+        if tg_config.session_file.exists():
+            shutil.copy2(str(tg_config.session_file), str(daemon_session))
 
-    # Remove stale socket from previous run BEFORE connect
-    SOCKET_PATH.unlink(missing_ok=True)
+        from dataclasses import replace
+        daemon_config: ResolvedTgConfig = replace(tg_config, session_file=daemon_session)
+        SOCKET_PATH.unlink(missing_ok=True)
 
-    # Create and connect client
-    client: TelegramClient = make_client(daemon_config, receive_updates=True)
-    await client.connect()
-    _set_daemon_client(client)
+        client = make_client(daemon_config, receive_updates=True)
+        await client.connect()
+        _set_daemon_client(client)
 
-    me: Any = await client.get_me()
-    print(f"kit tg daemon started (user: {me.first_name}, id: {me.id})", flush=True)
+        me: Any = await client.get_me()
+        print(f"kit tg daemon started (user: {me.first_name}, id: {me.id})", flush=True)
 
-    # Register NewMessage handler for push-based wait-next
-    from telethon import events
-    @client.on(events.NewMessage(incoming=True))
-    async def _handler(event: Any) -> None:
-        await _on_new_message(event)
+        from telethon import events
 
-    server: asyncio.AbstractServer = await asyncio.start_unix_server(
-        lambda r, w: handle_client(r, w, tg_config),
-        path=str(SOCKET_PATH),
-    )
-    os.chmod(str(SOCKET_PATH), 0o600)
-    _touch()
+        @client.on(events.NewMessage(incoming=True))
+        async def _handler(event: Any) -> None:
+            await _on_new_message(event)
 
-    async def _idle_watchdog() -> None:
-        while True:
-            await asyncio.sleep(30)
-            if _time.time() - _last_activity > IDLE_TIMEOUT:
-                server.close()
-                return
+        server = await asyncio.start_unix_server(
+            lambda r, w: handle_client(r, w, tg_config, shutdown_event),
+            path=str(SOCKET_PATH),
+        )
+        os.chmod(str(SOCKET_PATH), 0o600)
+        _touch()
 
-    print(f"socket: {SOCKET_PATH}", flush=True)
-    async with server:
-        watchdog: asyncio.Task[None] = asyncio.create_task(_idle_watchdog())
-        try:
-            await server.serve_forever()
-        except asyncio.CancelledError:
-            pass
-        finally:
-            watchdog.cancel()
+        async def _idle_watchdog() -> None:
+            while not shutdown_event.is_set():
+                await asyncio.sleep(30)
+                if _time.time() - _last_activity > IDLE_TIMEOUT:
+                    shutdown_event.set()
+
+        print(f"socket: {SOCKET_PATH}", flush=True)
+        async with server:
+            serve_task = asyncio.create_task(server.serve_forever())
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
+            watchdog = asyncio.create_task(_idle_watchdog())
+            await asyncio.wait(
+                (serve_task, shutdown_task), return_when=asyncio.FIRST_COMPLETED
+            )
+            server.close()
+            await server.wait_closed()
+            for task in (serve_task, shutdown_task, watchdog):
+                task.cancel()
+            for task in (serve_task, shutdown_task, watchdog):
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+    finally:
+        SOCKET_PATH.unlink(missing_ok=True)
+        _set_daemon_client(None)
+        if client is not None:
             try:
-                await watchdog
-            except asyncio.CancelledError:
-                pass
-            SOCKET_PATH.unlink(missing_ok=True)
-            _set_daemon_client(None)
-            disconnect_result = client.disconnect()
-            if disconnect_result is not None:
-                await disconnect_result
+                disconnect_result = client.disconnect()
+                if disconnect_result is not None:
+                    await disconnect_result
+            except Exception:
+                traceback.print_exc()
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+        lock_file.close()

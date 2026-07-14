@@ -679,8 +679,8 @@ def run_tg_speak(
             exit_code=5,
         )
 
-    voice_result: CommandResult = tg_commands.run(
-        tg_commands.send_voice(
+    try:
+        voice_result = _send_voice_via_daemon(
             tg_config,
             args.peer,
             generated_path,
@@ -688,12 +688,11 @@ def run_tg_speak(
             args.reply_to,
             args.full,
         )
-    )
-    if payload.get("saved"):
-        Path(generated_path).unlink(missing_ok=True)
+    finally:
+        if payload.get("saved"):
+            Path(generated_path).unlink(missing_ok=True)
 
-    assert voice_result.data is not None
-    data: dict[str, Any] = dict(voice_result.data)
+    data: dict[str, Any] = dict(voice_result.data or {})
     data["tts"] = {
         "backend": payload.get("backend") or backend,
         "voice": voice,
@@ -808,12 +807,19 @@ def _ensure_daemon(tg_config: Any) -> None:
     if _SOCK.exists():
         return
 
-    # Fork daemon process in background
-    _sp.Popen(
-        ["kit", "tg", "--profile", tg_config.profile, "_daemon"],
-        start_new_session=True, stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
-    )
-    # Wait for socket to appear
+    log_path = tg_config.session_file.parent / "daemon.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_file = log_path.open("ab")
+    try:
+        _sp.Popen(
+            ["kit", "tg", "--profile", tg_config.profile, "_daemon"],
+            start_new_session=True,
+            stdout=log_file,
+            stderr=log_file,
+        )
+    finally:
+        log_file.close()
+
     deadline: float = _t.time() + 5.0
     while not _SOCK.exists() and _t.time() < deadline:
         _t.sleep(0.1)
@@ -836,6 +842,74 @@ async def _daemon_request(request: dict[str, Any]) -> dict[str, Any]:
         return json.loads(line.decode())
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _request_daemon_with_recovery(
+    request: dict[str, Any], tg_config: Any
+) -> dict[str, Any]:
+    import time as _t
+    from assistant_tools.tg.daemon import SOCKET_PATH as _SOCK
+
+    resp = _asyncio.run(_daemon_request(request))
+    error = str(resp.get("error", ""))
+    if not resp.get("ok") and (
+        resp.get("error") == "daemon not running (no socket)"
+        or "Connection refused" in error
+    ):
+        _SOCK.unlink(missing_ok=True)
+        _ensure_daemon(tg_config)
+        if not _SOCK.exists():
+            return resp
+        resp = _asyncio.run(_daemon_request(request))
+
+    if resp.get("ok") or "database is locked" not in str(resp.get("error", "")).lower():
+        return resp
+
+    for delay in (0.2, 0.5, 1.0):
+        _t.sleep(delay)
+        resp = _asyncio.run(_daemon_request(request))
+        if resp.get("ok") or "database is locked" not in str(resp.get("error", "")).lower():
+            return resp
+
+    _asyncio.run(_daemon_request({"cmd": "shutdown"}))
+    deadline = _t.time() + 3.0
+    while _SOCK.exists() and _t.time() < deadline:
+        _t.sleep(0.1)
+    if _SOCK.exists():
+        return resp
+
+    _ensure_daemon(tg_config)
+    if not _SOCK.exists():
+        return resp
+    return _asyncio.run(_daemon_request(request))
+
+
+def _send_voice_via_daemon(
+    tg_config: Any,
+    peer: str,
+    path: str,
+    caption: str | None,
+    reply_to: int | None,
+    full: bool,
+) -> CommandResult:
+    _ensure_daemon(tg_config)
+    request = {
+        "cmd": "send_voice",
+        "peer": peer,
+        "path": path,
+        "caption": caption,
+        "reply_to": reply_to,
+        "full": full,
+    }
+    resp = _request_daemon_with_recovery(request, tg_config)
+    return CommandResult(
+        ok=resp.get("ok", False),
+        command="tg.send-voice",
+        provider="telethon+daemon",
+        data=resp.get("data"),
+        error=resp.get("error"),
+        meta={"daemon": True, "profile": tg_config.profile},
+    )
 
 
 def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
@@ -909,18 +983,7 @@ def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
     if request is None:
         return None
 
-    resp: dict[str, Any] = _asyncio.run(_daemon_request(request))
-    if not resp.get("ok") and resp.get("error") == "daemon not running (no socket)":
-        return None  # Socket disappeared — fall through
-
-    # Stale socket: daemon process dead but socket file remains (Connection refused)
-    if not resp.get("ok") and "Connection refused" in str(resp.get("error", "")):
-        _SOCK.unlink(missing_ok=True)
-        _ensure_daemon(tg_config)
-        if _SOCK.exists():
-            resp = _asyncio.run(_daemon_request(request))
-        else:
-            return None  # Still can't start daemon, fall through
+    resp = _request_daemon_with_recovery(request, tg_config)
 
     return CommandResult(
         ok=resp.get("ok", False),
