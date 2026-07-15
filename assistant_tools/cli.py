@@ -828,12 +828,15 @@ def _ensure_daemon(tg_config: Any) -> None:
 async def _daemon_request(request: dict[str, Any]) -> dict[str, Any]:
     """Send a request to the running daemon and return the response."""
     import asyncio as _aio
+    from assistant_tools.tg.daemon import IPC_STREAM_LIMIT as _IPC_STREAM_LIMIT
     from assistant_tools.tg.daemon import SOCKET_PATH as _SOCK
 
     if not _SOCK.exists():
         return {"ok": False, "error": "daemon not running (no socket)"}
     try:
-        reader, writer = await _aio.open_unix_connection(str(_SOCK))
+        reader, writer = await _aio.open_unix_connection(
+            str(_SOCK), limit=_IPC_STREAM_LIMIT
+        )
         writer.write(json.dumps(request, ensure_ascii=False).encode() + b"\n")
         await writer.drain()
         line: bytes = await reader.readline()

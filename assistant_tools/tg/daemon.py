@@ -25,6 +25,7 @@ from assistant_tools.tg.config import ResolvedTgConfig
 
 SOCKET_PATH: Path = Path(tempfile.gettempdir()) / "kit-tg-daemon.sock"
 LOCK_PATH: Path = Path(tempfile.gettempdir()) / "kit-tg-daemon.lock"
+IPC_STREAM_LIMIT: int = 16 * 1024 * 1024
 IDLE_TIMEOUT: float = 600.0  # 10 minutes
 
 _last_activity: float = 0.0
@@ -359,6 +360,7 @@ async def run_daemon(tg_config: ResolvedTgConfig) -> None:
         server = await asyncio.start_unix_server(
             lambda r, w: handle_client(r, w, tg_config, shutdown_event),
             path=str(SOCKET_PATH),
+            limit=IPC_STREAM_LIMIT,
         )
         os.chmod(str(SOCKET_PATH), 0o600)
         _touch()

@@ -88,6 +88,32 @@ def test_send_voice_uses_daemon_transport(monkeypatch: Any, tmp_path: Path) -> N
     ]
 
 
+def test_daemon_request_accepts_large_response(
+    monkeypatch: Any, tmp_path: Path
+) -> None:
+    async def run() -> None:
+        socket_path = tmp_path / "large-response.sock"
+        monkeypatch.setattr(daemon, "SOCKET_PATH", socket_path)
+
+        async def respond(
+            reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+        ) -> None:
+            await reader.readline()
+            payload = '{"ok":true,"data":{"value":"' + ("x" * 100_000) + '"}}\n'
+            writer.write(payload.encode())
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_unix_server(respond, path=str(socket_path))
+        async with server:
+            result = await cli._daemon_request({"cmd": "ping"})  # pyright: ignore[reportPrivateUsage]
+        assert result["ok"]
+        assert len(result["data"]["value"]) == 100_000
+
+    asyncio.run(run())
+
+
 def test_shutdown_request_sets_event() -> None:
     async def run() -> None:
         shutdown_event = asyncio.Event()
