@@ -27,6 +27,7 @@ from assistant_tools.models import CommandResult
 from assistant_tools.tg.client import make_client
 from assistant_tools.tg.client import telegram_client
 from assistant_tools.tg.config import ResolvedTgConfig
+from assistant_tools.tg.dialog_search import rank_existing_dialogs
 from assistant_tools.tg.normalize import normalize_chat
 from assistant_tools.tg.normalize import normalize_dialog
 from assistant_tools.tg.normalize import normalize_media
@@ -713,20 +714,42 @@ async def find_dialog(
     query: str,
     limit: int,
 ) -> CommandResult:
-    """Find dialog by name using native Telegram contact search."""
+    """Find a recent existing dialog before using native Telegram search."""
     from telethon.tl.functions.contacts import SearchRequest
 
+    dialog_scan_limit = 500
     async with telegram_client(config) as client:
-        result: Any = await client(SearchRequest(q=query, limit=limit))
-        matches: list[dict[str, Any]] = []
-        for user in (result.users or []):
-            matches.append({"type": "user", "chat": normalize_chat(user)})
-        for chat in (result.chats or []):
-            matches.append({"type": "chat", "chat": normalize_chat(chat)})
+        chats: list[dict[str, Any]] = []
+        async for dialog in client.iter_dialogs(limit=dialog_scan_limit):
+            chats.append(normalize_chat(getattr(dialog, "entity", None)))
+
+        matches = rank_existing_dialogs(chats, query, limit)
+        fallback_used = not matches
+        if fallback_used:
+            result: Any = await client(SearchRequest(q=query, limit=limit))
+            seen: set[tuple[str | None, int | None]] = set()
+            for entity in [*(result.users or []), *(result.chats or [])]:
+                chat = normalize_chat(entity)
+                identity = (chat.get("type"), chat.get("id"))
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                matches.append(
+                    {
+                        "type": chat.get("type"),
+                        "chat": chat,
+                        "source": "native-search",
+                        "match": "native",
+                    }
+                )
 
     return _ok(
         "tg.find-dialog",
-        {"matches": matches},
+        {
+            "matches": matches[:limit],
+            "searched_dialogs": len(chats),
+            "fallback_used": fallback_used,
+        },
         {"query": query, "limit": limit, "profile": config.profile},
     )
 
