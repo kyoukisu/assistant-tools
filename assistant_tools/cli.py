@@ -346,7 +346,7 @@ def build_parser() -> argparse.ArgumentParser:
     tg_stt.add_argument("--language", default="", help="Language hint (e.g. ru, en)")
 
     tg_find_dialog = tg_subparsers.add_parser(
-        "find-dialog", help="Find a recent dialog, then fall back to Telegram search"
+        "find-dialog", help="Search Telegram globally for unverified peer candidates"
     )
     tg_find_dialog.add_argument("query", help="Search query (name, username, title)")
     tg_find_dialog.add_argument("--limit", type=int, default=20, help="Max results to return")
