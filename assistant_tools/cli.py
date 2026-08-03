@@ -26,6 +26,9 @@ from assistant_tools.utils import is_url
 from assistant_tools.utils import require_env
 
 
+DAEMON_LOCKED_ERROR = "database is locked"
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser: argparse.ArgumentParser = argparse.ArgumentParser(prog="kit")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -149,7 +152,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     tts_parser.add_argument("--voice", default=None, help="Voice name override")
     tts_parser.add_argument("--model", default=None, help="TTS model override")
-    tts_parser.add_argument("--language", default=None, help="Language code override, e.g. en or ru")
+    tts_parser.add_argument(
+        "--language", default=None, help="Language code override, e.g. en or ru"
+    )
     tts_parser.add_argument("--speed", type=float, default=None, help="Speech speed")
     tts_parser.add_argument(
         "--clean-text",
@@ -205,6 +210,26 @@ def build_parser() -> argparse.ArgumentParser:
     tg_resolve = tg_subparsers.add_parser("resolve", help="Resolve a Telegram peer")
     tg_resolve.add_argument("peer", help="Username, id, me, or t.me link")
 
+    tg_miniapp = tg_subparsers.add_parser(
+        "miniapp", help="Get a Telegram-issued Mini App launch URL"
+    )
+    tg_miniapp_subparsers = tg_miniapp.add_subparsers(dest="miniapp_command", required=True)
+    tg_miniapp_main = tg_miniapp_subparsers.add_parser(
+        "main", help="Get a launch URL for a bot's configured Main Mini App"
+    )
+    tg_miniapp_main.add_argument("bot", help="Bot username or id")
+    tg_miniapp_main.add_argument(
+        "--start-param", default=None, help="Optional Main Mini App start parameter"
+    )
+    tg_miniapp_main.add_argument(
+        "--platform", choices=["tdesktop", "android", "ios"], default="tdesktop"
+    )
+    tg_miniapp_mode = tg_miniapp_main.add_mutually_exclusive_group()
+    tg_miniapp_mode.add_argument("--compact", action="store_true", help="Request compact mode")
+    tg_miniapp_mode.add_argument(
+        "--fullscreen", action="store_true", help="Request fullscreen mode"
+    )
+
     tg_dialogs = tg_subparsers.add_parser("dialogs", help="List Telegram dialogs")
     tg_dialogs.add_argument("--limit", type=int, default=20)
     tg_dialogs.add_argument("--full", action="store_true", help="Return fuller dialog objects")
@@ -228,7 +253,9 @@ def build_parser() -> argparse.ArgumentParser:
     tg_send.add_argument("peer", help="Target peer")
     tg_send.add_argument("text", help="Message text")
     tg_send.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
-    tg_send.add_argument("--parse-mode", default=None, choices=["md", "html"], help="Parse mode: md or html")
+    tg_send.add_argument(
+        "--parse-mode", default=None, choices=["md", "html"], help="Parse mode: md or html"
+    )
     tg_send.add_argument("--full", action="store_true", help="Return fuller sent message object")
 
     tg_send_file = tg_subparsers.add_parser("send-file", help="Send local file as document")
@@ -241,7 +268,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     tg_send_media = tg_subparsers.add_parser(
-        "send-media", aliases=["send-photo"], help="Send local media as Telegram photo/video (multiple = album)"
+        "send-media",
+        aliases=["send-photo"],
+        help="Send local media as Telegram photo/video (multiple = album)",
     )
     tg_send_media.add_argument("peer", help="Target peer")
     tg_send_media.add_argument("path", nargs="+", help="Local image/video path(s)")
@@ -299,7 +328,8 @@ def build_parser() -> argparse.ArgumentParser:
     tg_wait_next = tg_subparsers.add_parser("wait-next", help="Wait for the next incoming message")
     tg_wait_next.add_argument("peer", nargs="+", help="Target peer(s) — one or more")
     tg_wait_next.add_argument(
-        "--timeout", "--timeout-seconds",
+        "--timeout",
+        "--timeout-seconds",
         type=float,
         default=0,
         help="Seconds to wait (0 = infinite)",
@@ -537,17 +567,15 @@ def run_video(
     output_dir: str = (
         str(args.output_dir) if args.output_dir is not None else config.video.output_dir
     )
-    max_frames: int = (
-        int(args.max_frames) if args.max_frames is not None else config.video.max_frames
-    )
+    max_frames: int = args.max_frames if args.max_frames is not None else config.video.max_frames
     seconds_per_frame: float = (
-        float(args.seconds_per_frame)
+        args.seconds_per_frame
         if args.seconds_per_frame is not None
         else config.video.seconds_per_frame
     )
     frame_format: str = args.frame_format or config.video.frame_format
     requested_timestamps: list[float] | None = (
-        [float(item) for item in args.at_seconds] if args.at_seconds is not None else None
+        list(args.at_seconds) if args.at_seconds is not None else None
     )
     align_to_segments: bool = (
         args.align_to_segments
@@ -606,10 +634,10 @@ def run_tts(
     model: str = args.model or config.tts.model
     voice: str = args.voice or config.tts.voice
     language: str = args.language if args.language is not None else config.tts.language
-    speed: float = float(args.speed) if args.speed is not None else config.tts.speed
+    speed: float = args.speed if args.speed is not None else config.tts.speed
     clean_text: bool = args.clean_text if args.clean_text is not None else config.tts.clean_text
     play: bool = args.play if args.play is not None else config.tts.autoplay
-    volume: int = int(args.volume) if args.volume is not None else config.tts.volume
+    volume: int = args.volume if args.volume is not None else config.tts.volume
     output: str | None = str(args.output) if args.output is not None else None
     save: bool = bool(args.save or output is not None)
 
@@ -654,7 +682,7 @@ def run_tg_speak(
     model: str = args.model or config.tts.model
     voice: str = args.voice or config.tts.voice
     language: str = args.language if args.language is not None else config.tts.language
-    speed: float = float(args.speed) if args.speed is not None else config.tts.speed
+    speed: float = args.speed if args.speed is not None else config.tts.speed
     clean_text: bool = args.clean_text if args.clean_text is not None else config.tts.clean_text
 
     payload: dict[str, Any] = tts_provider.synthesize(
@@ -748,6 +776,7 @@ _VIDEO_EXTENSIONS: set[str] = {".mp4", ".avi", ".mkv", ".mov", ".webm", ".flv", 
 def _validate_video_if_needed(path: str) -> None:
     """Run ffprobe on video files to catch corrupted files before sending."""
     import subprocess as _subprocess
+
     p = Path(path)
     if p.suffix.lower() not in _VIDEO_EXTENSIONS:
         return
@@ -755,7 +784,9 @@ def _validate_video_if_needed(path: str) -> None:
         raise AssistantToolsError(f"File not found: {path}", error_type="file_not_found")
     result = _subprocess.run(
         ["ffprobe", "-v", "error", "-i", path, "-f", "null", "-"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if result.returncode != 0:
         raise AssistantToolsError(
@@ -777,8 +808,12 @@ def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
     dl_path: str = dl_data.get("path", "")
     if not dl_path:
         return CommandResult(
-            ok=False, command="tg.stt", provider="groq", data=None,
-            error={"type": "no_media", "message": "Message has no downloadable media"}, meta={},
+            ok=False,
+            command="tg.stt",
+            provider="groq",
+            data=None,
+            error={"type": "no_media", "message": "Message has no downloadable media"},
+            meta={},
         )
     # Rename to .ogg for whisper compatibility
     ogg_path: str = dl_path if dl_path.endswith(".ogg") else f"{dl_path.rsplit('.', 1)[0]}.ogg"
@@ -786,15 +821,25 @@ def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
         shutil.copy2(dl_path, ogg_path)
     api_key: str = config.stt.api_key or require_env("GROQ_API_KEY")
     result_data: dict[str, Any] = groq_provider.transcribe(
-        source=ogg_path, api_key=api_key, model=config.stt.model,
-        language=args.language or "", url=config.stt.url,
-        timeout_seconds=60, timestamps="none", temperature=0.0, prompt="", proxy=None,
+        source=ogg_path,
+        api_key=api_key,
+        model=config.stt.model,
+        language=args.language or "",
+        url=config.stt.url,
+        timeout_seconds=60,
+        timestamps="none",
+        temperature=0.0,
+        prompt="",
+        proxy=None,
     )
     text: str = result_data.get("text", "")
     return CommandResult(
-        ok=True, command="tg.stt", provider="groq",
+        ok=True,
+        command="tg.stt",
+        provider="groq",
         data={"text": text, "source_path": dl_path, "message_id": args.message_id},
-        error=None, meta={"peer": args.peer, "model": config.stt.model},
+        error=None,
+        meta={"peer": args.peer, "model": config.stt.model},
     )
 
 
@@ -834,9 +879,7 @@ async def _daemon_request(request: dict[str, Any]) -> dict[str, Any]:
     if not _SOCK.exists():
         return {"ok": False, "error": "daemon not running (no socket)"}
     try:
-        reader, writer = await _aio.open_unix_connection(
-            str(_SOCK), limit=_IPC_STREAM_LIMIT
-        )
+        reader, writer = await _aio.open_unix_connection(str(_SOCK), limit=_IPC_STREAM_LIMIT)
         writer.write(json.dumps(request, ensure_ascii=False).encode() + b"\n")
         await writer.drain()
         line: bytes = await reader.readline()
@@ -847,17 +890,19 @@ async def _daemon_request(request: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-def _request_daemon_with_recovery(
-    request: dict[str, Any], tg_config: Any
-) -> dict[str, Any]:
+def _daemon_response_is_locked(response: dict[str, Any]) -> bool:
+    error: str = str(response.get("error", "")).lower()
+    return DAEMON_LOCKED_ERROR in error
+
+
+def _request_daemon_with_recovery(request: dict[str, Any], tg_config: Any) -> dict[str, Any]:
     import time as _t
     from assistant_tools.tg.daemon import SOCKET_PATH as _SOCK
 
     resp = _asyncio.run(_daemon_request(request))
     error = str(resp.get("error", ""))
     if not resp.get("ok") and (
-        resp.get("error") == "daemon not running (no socket)"
-        or "Connection refused" in error
+        resp.get("error") == "daemon not running (no socket)" or "Connection refused" in error
     ):
         _SOCK.unlink(missing_ok=True)
         _ensure_daemon(tg_config)
@@ -865,13 +910,13 @@ def _request_daemon_with_recovery(
             return resp
         resp = _asyncio.run(_daemon_request(request))
 
-    if resp.get("ok") or "database is locked" not in str(resp.get("error", "")).lower():
+    if not _daemon_response_is_locked(resp):
         return resp
 
     for delay in (0.2, 0.5, 1.0):
         _t.sleep(delay)
         resp = _asyncio.run(_daemon_request(request))
-        if resp.get("ok") or "database is locked" not in str(resp.get("error", "")).lower():
+        if not _daemon_response_is_locked(resp):
             return resp
 
     _asyncio.run(_daemon_request({"cmd": "shutdown"}))
@@ -930,56 +975,114 @@ def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
     request: dict[str, Any] | None = None
 
     if cmd == "send":
-        request = {"cmd": "send", "peer": args.peer, "text": args.text,
-                   "reply_to": args.reply_to, "full": args.full, "parse_mode": getattr(args, "parse_mode", None)}
+        request = {
+            "cmd": "send",
+            "peer": args.peer,
+            "text": args.text,
+            "reply_to": args.reply_to,
+            "full": args.full,
+            "parse_mode": getattr(args, "parse_mode", None),
+        }
     elif cmd in ("send-media", "send-photo"):
         _paths: list[str] = [str(p) for p in args.path]  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportUnknownVariableType]
         if len(_paths) == 1:
-            request = {"cmd": "send_media", "peer": args.peer, "path": _paths[0],
-                       "caption": args.caption, "reply_to": args.reply_to, "full": args.full,
-                       "force_video": not getattr(args, "as_gif", False)}
+            request = {
+                "cmd": "send_media",
+                "peer": args.peer,
+                "path": _paths[0],
+                "caption": args.caption,
+                "reply_to": args.reply_to,
+                "full": args.full,
+                "force_video": not getattr(args, "as_gif", False),
+            }
         else:
             return None  # Albums fall through to direct
     elif cmd == "send-file":
-        request = {"cmd": "send_file", "peer": args.peer, "path": str(args.path),
-                   "caption": args.caption, "reply_to": args.reply_to, "full": args.full}
+        request = {
+            "cmd": "send_file",
+            "peer": args.peer,
+            "path": str(args.path),
+            "caption": args.caption,
+            "reply_to": args.reply_to,
+            "full": args.full,
+        }
     elif cmd == "history":
-        request = {"cmd": "history", "peer": args.peer, "limit": args.limit,
-                   "offset_id": args.offset_id, "full": args.full}
+        request = {
+            "cmd": "history",
+            "peer": args.peer,
+            "limit": args.limit,
+            "offset_id": args.offset_id,
+            "full": args.full,
+        }
     elif cmd == "get":
-        request = {"cmd": "get", "peer": args.peer, "message_ids": list(args.message_ids),
-                   "full": args.full}
+        request = {
+            "cmd": "get",
+            "peer": args.peer,
+            "message_ids": list(args.message_ids),
+            "full": args.full,
+        }
     elif cmd == "resolve":
         request = {"cmd": "resolve", "peer": args.peer}
     elif cmd == "find-dialog":
         request = {"cmd": "find_dialog", "query": args.query, "limit": args.limit}
     elif cmd == "forward":
-        request = {"cmd": "forward", "from_peer": args.from_peer, "to_peer": args.to_peer,
-                   "message_ids": list(args.message_ids)}
+        request = {
+            "cmd": "forward",
+            "from_peer": args.from_peer,
+            "to_peer": args.to_peer,
+            "message_ids": list(args.message_ids),
+        }
     elif cmd == "edit":
-        request = {"cmd": "edit", "peer": args.peer, "message_id": args.message_id,
-                   "text": args.text, "parse_mode": getattr(args, "parse_mode", None)}
+        request = {
+            "cmd": "edit",
+            "peer": args.peer,
+            "message_id": args.message_id,
+            "text": args.text,
+            "parse_mode": getattr(args, "parse_mode", None),
+        }
     elif cmd == "delete":
         request = {"cmd": "delete", "peer": args.peer, "message_ids": list(args.message_ids)}
     elif cmd == "react":
-        request = {"cmd": "react", "peer": args.peer, "message_id": args.message_id,
-                   "emoji": args.emoji}
+        request = {
+            "cmd": "react",
+            "peer": args.peer,
+            "message_id": args.message_id,
+            "emoji": args.emoji,
+        }
     elif cmd == "send-voice":
-        request = {"cmd": "send_voice", "peer": args.peer, "path": str(args.path),
-                   "caption": args.caption, "reply_to": args.reply_to, "full": args.full}
+        request = {
+            "cmd": "send_voice",
+            "peer": args.peer,
+            "path": str(args.path),
+            "caption": args.caption,
+            "reply_to": args.reply_to,
+            "full": args.full,
+        }
     elif cmd == "search":
-        request = {"cmd": "search", "peer": args.peer, "query": args.query,
-                   "limit": args.limit, "full": args.full}
+        request = {
+            "cmd": "search",
+            "peer": args.peer,
+            "query": args.query,
+            "limit": args.limit,
+            "full": args.full,
+        }
     elif cmd == "media-download":
-        request = {"cmd": "media_download", "peer": args.peer,
-                   "message_ids": list(args.message_ids),
-                   "output_dir": args.output_dir, "full": args.full}
+        request = {
+            "cmd": "media_download",
+            "peer": args.peer,
+            "message_ids": list(args.message_ids),
+            "output_dir": args.output_dir,
+            "full": args.full,
+        }
     elif cmd == "media-info":
-        request = {"cmd": "media_info", "peer": args.peer,
-                   "message_id": args.message_id, "full": args.full}
+        request = {
+            "cmd": "media_info",
+            "peer": args.peer,
+            "message_id": args.message_id,
+            "full": args.full,
+        }
     elif cmd == "wait-next":
-        request = {"cmd": "wait_next", "peers": list(args.peer),
-                   "timeout": float(args.timeout)}
+        request = {"cmd": "wait_next", "peers": list(args.peer), "timeout": args.timeout}
     elif cmd == "dialogs":
         request = {"cmd": "dialogs", "limit": args.limit, "full": args.full}
 
@@ -1016,6 +1119,7 @@ def dispatch(
         return run_tts(args, config, verbose, config_path)
     if args.command == "config":
         from assistant_tools.config import DEFAULT_CONFIG_PATH
+
         config_path_resolved: Path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
         cmd: str = getattr(args, "config_command", "show") or "show"
         if cmd == "show":
@@ -1023,12 +1127,27 @@ def dispatch(
                 print(config_path_resolved.read_text())
             else:
                 print(f"No config file at {config_path_resolved}")
-            return CommandResult(ok=True, command="config.show", provider="local", data={}, error=None, meta={"path": str(config_path_resolved)})
+            return CommandResult(
+                ok=True,
+                command="config.show",
+                provider="local",
+                data={},
+                error=None,
+                meta={"path": str(config_path_resolved)},
+            )
         if cmd == "path":
             print(str(config_path_resolved))
-            return CommandResult(ok=True, command="config.path", provider="local", data={"path": str(config_path_resolved)}, error=None, meta={})
+            return CommandResult(
+                ok=True,
+                command="config.path",
+                provider="local",
+                data={"path": str(config_path_resolved)},
+                error=None,
+                meta={},
+            )
         if cmd == "set":
             import re as _re
+
             content: str = config_path_resolved.read_text() if config_path_resolved.exists() else ""
             section: str
             sep: str
@@ -1063,15 +1182,25 @@ def dispatch(
             config_path_resolved.parent.mkdir(parents=True, exist_ok=True)
             config_path_resolved.write_text(content)
             print(f"Set {args.key} = {args.value}")
-            return CommandResult(ok=True, command="config.set", provider="local", data={"key": args.key, "value": args.value}, error=None, meta={})
+            return CommandResult(
+                ok=True,
+                command="config.set",
+                provider="local",
+                data={"key": args.key, "value": args.value},
+                error=None,
+                meta={},
+            )
     if args.command == "tg":
         tg_config = resolve_tg_config(config, args.profile)
 
         # Internal daemon process
         if args.tg_command == "_daemon":
             from assistant_tools.tg.daemon import run_daemon
+
             _asyncio.run(run_daemon(tg_config))
-            return CommandResult(ok=True, command="tg._daemon", provider="telethon", data={}, error=None, meta={})
+            return CommandResult(
+                ok=True, command="tg._daemon", provider="telethon", data={}, error=None, meta={}
+            )
 
         # Daemon middleware: transparently proxies supported commands
         if args.tg_command not in ("auth", "speak", "copy", "stt", "participants"):
@@ -1081,7 +1210,9 @@ def dispatch(
 
         # Validate video files before send-media (catches corrupted files early)
         if args.tg_command in ("send-media", "send-photo", "send-file"):
-            _vpaths: list[str] = [str(p) for p in args.path] if args.tg_command != "send-file" else [str(args.path)]  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportUnknownVariableType]
+            _vpaths: list[str] = (
+                [str(p) for p in args.path] if args.tg_command != "send-file" else [str(args.path)]
+            )  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType, reportUnknownVariableType]
             for p in _vpaths:
                 _validate_video_if_needed(p)
         if args.tg_command == "auth":
@@ -1099,12 +1230,24 @@ def dispatch(
                 )
         if args.tg_command == "resolve":
             return tg_commands.run(tg_commands.resolve_peer(tg_config, args.peer))
+        if args.tg_command == "miniapp":
+            if args.miniapp_command == "main":
+                return tg_commands.run(
+                    tg_commands.miniapp_main_url(
+                        tg_config,
+                        args.bot,
+                        args.start_param,
+                        args.platform,
+                        args.compact,
+                        args.fullscreen,
+                    )
+                )
         if args.tg_command == "find-dialog":
             return tg_commands.run(
                 tg_commands.find_dialog(
                     tg_config,
                     query=str(args.query),
-                    limit=int(args.limit),
+                    limit=args.limit,
                 )
             )
         if args.tg_command == "dialogs":
@@ -1121,7 +1264,9 @@ def dispatch(
             )
         if args.tg_command == "send":
             return tg_commands.run(
-                tg_commands.send_message(tg_config, args.peer, args.text, args.reply_to, args.full, args.parse_mode)
+                tg_commands.send_message(
+                    tg_config, args.peer, args.text, args.reply_to, args.full, args.parse_mode
+                )
             )
         if args.tg_command == "send-file":
             return tg_commands.run(
@@ -1135,7 +1280,12 @@ def dispatch(
                 as_gif: bool = getattr(args, "as_gif", False)
                 return tg_commands.run(
                     tg_commands.send_media(
-                        tg_config, args.peer, _paths[0], args.caption, args.reply_to, args.full,
+                        tg_config,
+                        args.peer,
+                        _paths[0],
+                        args.caption,
+                        args.reply_to,
+                        args.full,
                         force_video=not as_gif,
                     )
                 )
@@ -1143,7 +1293,12 @@ def dispatch(
                 as_gif = getattr(args, "as_gif", False)
                 return tg_commands.run(
                     tg_commands.send_album(
-                        tg_config, args.peer, _paths, args.caption, args.reply_to, args.full,
+                        tg_config,
+                        args.peer,
+                        _paths,
+                        args.caption,
+                        args.reply_to,
+                        args.full,
                         force_video=not as_gif,
                     )
                 )
@@ -1168,7 +1323,7 @@ def dispatch(
                 tg_commands.wait_next_message(
                     tg_config,
                     list(args.peer),
-                    float(args.timeout),
+                    args.timeout,
                     args.full,
                 )
             )
@@ -1190,11 +1345,15 @@ def dispatch(
             )
         if args.tg_command == "forward":
             return tg_commands.run(
-                tg_commands.forward_message(tg_config, args.from_peer, args.to_peer, list(args.message_ids))
+                tg_commands.forward_message(
+                    tg_config, args.from_peer, args.to_peer, list(args.message_ids)
+                )
             )
         if args.tg_command == "edit":
             return tg_commands.run(
-                tg_commands.edit_message(tg_config, args.peer, args.message_id, args.text, args.parse_mode)
+                tg_commands.edit_message(
+                    tg_config, args.peer, args.message_id, args.text, args.parse_mode
+                )
             )
         if args.tg_command == "delete":
             return tg_commands.run(

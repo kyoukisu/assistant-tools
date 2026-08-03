@@ -306,6 +306,19 @@ kit tg react me 123 "🔥"
 kit tg copy me 123 another_chat
 ```
 
+### Telegram Mini Apps
+
+Get a short-lived launch URL for a bot's configured Main Mini App:
+
+```bash
+kit tg miniapp main @example_bot
+kit tg miniapp main @example_bot --start-param campaign --fullscreen
+```
+
+The returned `data.url` is sensitive, account-bound launch data. Pass it
+directly to a WebView and do not log, save, or share it. This command obtains
+a Telegram-issued URL; it does not emulate Telegram's WebApp browser bridge.
+
 Notes:
 
 - `send-file` sends a local file as a document.

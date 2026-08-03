@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from datetime import UTC
 from datetime import datetime
 from getpass import getpass
@@ -89,7 +90,7 @@ async def _resolve_peer_entity(client: TelegramClient, peer: str) -> Any:
             entity: Any = getattr(dialog, "entity", None)
             if entity is None:
                 continue
-            if utils.get_peer_id(entity) == int(peer):
+            if utils.get_peer_id(entity) == utils.get_peer_id(marked_peer):
                 return await client.get_input_entity(entity)
 
         raise _error(
@@ -106,6 +107,18 @@ async def _resolve_peer_entity(client: TelegramClient, peer: str) -> Any:
         return await client.get_input_entity(peer)
     except ValueError:
         return await client.get_entity(peer)
+
+
+def _message_id(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _failure_detail(stderr: str | None) -> str:
+    message: str = (stderr or "").strip()
+    return f": {message}" if message else ""
 
 
 def _voice_upload_path(path: Path) -> tuple[Path, bool]:
@@ -141,8 +154,7 @@ def _voice_upload_path(path: Path) -> tuple[Path, bool]:
         raise _error("missing_runtime", "ffmpeg is not available in PATH", exit_code=5) from err
     except subprocess.CalledProcessError as err:
         tmp_path.unlink(missing_ok=True)
-        stderr: str = (err.stderr or "").strip()
-        detail: str = f": {stderr}" if stderr else ""
+        detail: str = _failure_detail(err.stderr)
         raise _error(
             "voice_convert_failed", f"ffmpeg voice conversion failed{detail}", exit_code=5
         ) from err
@@ -151,10 +163,13 @@ def _voice_upload_path(path: Path) -> tuple[Path, bool]:
 
 def _is_incompatible_session_error(err: Exception) -> bool:
     message: str = str(err).lower()
-    return (
-        "no such column: version" in message
-        or "database disk image is malformed" in message
-        or "file is not a database" in message
+    return any(
+        fragment in message
+        for fragment in (
+            "no such column: version",
+            "database disk image is malformed",
+            "file is not a database",
+        )
     )
 
 
@@ -323,6 +338,45 @@ async def resolve_peer(config: ResolvedTgConfig, peer: str) -> CommandResult:
         )
 
 
+async def miniapp_main_url(
+    config: ResolvedTgConfig,
+    bot: str,
+    start_param: str | None,
+    platform: str,
+    compact: bool,
+    fullscreen: bool,
+) -> CommandResult:
+    """Get the short-lived Telegram-issued URL for a bot's Main Mini App."""
+    from telethon.tl.functions.messages import RequestMainWebViewRequest
+    from telethon.tl.types import InputPeerEmpty
+
+    async with telegram_client(config) as client:
+        input_bot: Any = await _resolve_peer_entity(client, bot)
+        result: Any = await client(
+            RequestMainWebViewRequest(
+                peer=InputPeerEmpty(),
+                bot=input_bot,
+                platform=platform,
+                start_param=start_param,
+                compact=compact or None,
+                fullscreen=fullscreen or None,
+            )
+        )
+        return _ok(
+            "tg.miniapp.main",
+            {"url": result.url, "sensitive": True},
+            {
+                "bot": bot,
+                "profile": config.profile,
+                "platform": platform,
+                "compact": compact,
+                "fullscreen": fullscreen,
+                "has_start_param": start_param is not None,
+                "sensitive_fields": ["data.url"],
+            },
+        )
+
+
 async def dialogs(config: ResolvedTgConfig, limit: int, full: bool) -> CommandResult:
     async with telegram_client(config) as client:
         items: list[dict[str, Any]] = []
@@ -395,7 +449,12 @@ async def get_messages(
 
 
 async def send_message(
-    config: ResolvedTgConfig, peer: str, text: str, reply_to_message_id: int | None, full: bool, parse_mode: str | None = None
+    config: ResolvedTgConfig,
+    peer: str,
+    text: str,
+    reply_to_message_id: int | None,
+    full: bool,
+    parse_mode: str | None = None,
 ) -> CommandResult:
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
@@ -465,11 +524,20 @@ async def send_media(
     input_path: Path = _ensure_local_file(path_value)
     upload_path: Path = input_path
     tmp_path: Path | None = None
-    is_video: bool = force_video and input_path.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm")
+    is_video: bool = force_video and input_path.suffix.lower() in (
+        ".mp4",
+        ".mkv",
+        ".avi",
+        ".mov",
+        ".webm",
+    )
 
     if is_video:
         probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-i", str(input_path)], capture_output=True, text=True, timeout=30,
+            ["ffprobe", "-v", "error", "-i", str(input_path)],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         has_audio: bool = "Audio:" in probe.stderr
         if not has_audio:
@@ -477,9 +545,24 @@ async def send_media(
             tmp.close()
             tmp_path = Path(tmp.name)
             ff_result = subprocess.run(
-                ["ffmpeg", "-y", "-i", str(input_path), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
-                 "-c:v", "copy", "-c:a", "aac", "-shortest", str(tmp_path)],
-                capture_output=True, timeout=120,
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    str(input_path),
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "anullsrc=r=44100:cl=mono",
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
+                    "-shortest",
+                    str(tmp_path),
+                ],
+                capture_output=True,
+                timeout=120,
             )
             if ff_result.returncode == 0:
                 upload_path = tmp_path
@@ -565,13 +648,16 @@ async def send_voice(
 async def react(config: ResolvedTgConfig, peer: str, message_id: int, emoji: str) -> CommandResult:
     from telethon.tl.functions.messages import SendReactionRequest
     from telethon.tl.types import ReactionEmoji
+
     async with telegram_client(config) as client:
         entity: Any = await _resolve_peer_entity(client, peer)
-        await client(SendReactionRequest(
-            peer=entity,
-            msg_id=message_id,
-            reaction=[ReactionEmoji(emoticon=emoji)],
-        ))
+        await client(
+            SendReactionRequest(
+                peer=entity,
+                msg_id=message_id,
+                reaction=[ReactionEmoji(emoticon=emoji)],
+            )
+        )
         return _ok(
             "tg.react",
             {"peer": peer, "message_id": message_id, "emoji": emoji},
@@ -611,16 +697,34 @@ async def send_album(
         for p in input_paths:
             if p.suffix.lower() in (".mp4", ".mkv", ".avi", ".mov", ".webm"):
                 probe = subprocess.run(
-                    ["ffprobe", "-v", "error", "-i", str(p)], capture_output=True, text=True, timeout=30,
+                    ["ffprobe", "-v", "error", "-i", str(p)],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
                 )
                 if "Audio:" not in probe.stderr:
                     tmp = tempfile.NamedTemporaryFile(suffix=f"_{p.name}", delete=False)
                     tmp.close()
                     tmp_path = Path(tmp.name)
                     ff_result = subprocess.run(
-                        ["ffmpeg", "-y", "-i", str(p), "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono",
-                         "-c:v", "copy", "-c:a", "aac", "-shortest", str(tmp_path)],
-                        capture_output=True, timeout=120,
+                        [
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            str(p),
+                            "-f",
+                            "lavfi",
+                            "-i",
+                            "anullsrc=r=44100:cl=mono",
+                            "-c:v",
+                            "copy",
+                            "-c:a",
+                            "aac",
+                            "-shortest",
+                            str(tmp_path),
+                        ],
+                        capture_output=True,
+                        timeout=120,
                     )
                     if ff_result.returncode == 0:
                         upload_paths.append(tmp_path)
@@ -642,7 +746,7 @@ async def send_album(
             reply_to=reply_to_message_id,
         )
         items: list[dict[str, Any]] = []
-        for msg in (messages if isinstance(messages, list) else [messages]):
+        for msg in messages if isinstance(messages, list) else [messages]:
             items.append(normalize_message(msg, chat_entity=entity, full=full))
         for tf in temp_files:
             tf.unlink(missing_ok=True)
@@ -668,13 +772,18 @@ async def forward_message(
         to_entity: Any = await _resolve_peer_entity(client, to_peer)
         fwd: Any = await client.forward_messages(to_entity, message_ids, from_entity)
         items: list[dict[str, Any]] = []
-        for msg in (fwd if isinstance(fwd, list) else [fwd]):
+        for msg in fwd if isinstance(fwd, list) else [fwd]:
             if msg:
                 items.append(normalize_message(msg, chat_entity=to_entity, full=False))
         return _ok(
             "tg.forward",
             {"messages": items},
-            {"from_peer": from_peer, "to_peer": to_peer, "message_ids": message_ids, "profile": config.profile},
+            {
+                "from_peer": from_peer,
+                "to_peer": to_peer,
+                "message_ids": message_ids,
+                "profile": config.profile,
+            },
         )
 
 
@@ -766,16 +875,18 @@ async def wait_next_message(
             baseline_id: int = 0
             if latest:
                 first: Any = latest[0] if isinstance(latest, list) else latest
-                baseline_id = int(getattr(first, "id", 0) or 0)
-            peer_data.append({
-                "peer": peer,
-                "entity": entity,
-                "is_self_chat": is_self_chat,
-                "baseline_id": baseline_id,
-            })
+                baseline_id = _message_id(getattr(first, "id", 0))
+            peer_data.append(
+                {
+                    "peer": peer,
+                    "entity": entity,
+                    "is_self_chat": is_self_chat,
+                    "baseline_id": baseline_id,
+                }
+            )
 
         loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
-        deadline: float = loop.time() + timeout_seconds if not infinite else float("inf")
+        deadline: float = loop.time() + timeout_seconds if not infinite else math.inf
         while True:
             remaining: float = deadline - loop.time()
             if not infinite and remaining <= 0:
@@ -789,7 +900,7 @@ async def wait_next_message(
                 messages: Any = await client.get_messages(pd["entity"], limit=50)
                 candidates: list[Any] = []
                 for message in list(messages or []):
-                    message_id: int = int(getattr(message, "id", 0) or 0)
+                    message_id: int = _message_id(getattr(message, "id", 0))
                     message_date: datetime | None = getattr(message, "date", None)
                     is_after_baseline: bool = message_id > pd["baseline_id"]
                     is_after_start: bool = bool(
@@ -802,10 +913,14 @@ async def wait_next_message(
                     candidates.append(message)
 
                 if candidates:
-                    message = min(candidates, key=lambda item: int(getattr(item, "id", 0) or 0))
+                    message = min(candidates, key=lambda item: _message_id(getattr(item, "id", 0)))
                     return _ok(
                         "tg.wait-next",
-                        {"message": normalize_message(message, chat_entity=pd["entity"], full=full)},
+                        {
+                            "message": normalize_message(
+                                message, chat_entity=pd["entity"], full=full
+                            )
+                        },
                         {
                             "peer": pd["peer"],
                             "peers": peers,
