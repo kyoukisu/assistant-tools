@@ -125,8 +125,9 @@ class ShardxClient:
                     error_type = str(
                         typed_error.get("code", typed_error.get("type", error_type))
                     )
-                elif typed_payload.get("message"):
-                    message = str(typed_payload["message"])
+                elif typed_payload.get("message") or typed_payload.get("error"):
+                    message = str(typed_payload.get("message", typed_payload.get("error")))
+                    error_type = str(typed_payload.get("code", error_type))
         except ValueError:
             pass
         raise AssistantToolsError(
@@ -170,16 +171,15 @@ def _ensure_session(client: ShardxClient, args: Any, session: str) -> dict[str, 
                         exit_code=1,
                     )
                 return item
-    return client.request_json(
-        "POST",
-        "/sessions",
-        json={
-            "session_id": session,
-            "proxy": args.proxy,
-            "fingerprint": args.fingerprint,
-            "live": bool(args.live),
-        },
-    )
+    body: dict[str, Any] = {
+        "session_id": session,
+        "live": bool(args.live),
+    }
+    if args.proxy:
+        body["proxy"] = args.proxy
+    if args.fingerprint:
+        body["fingerprint"] = args.fingerprint
+    return client.request_json("POST", "/sessions", json=body)
 
 
 def run(args: Any) -> CommandResult:

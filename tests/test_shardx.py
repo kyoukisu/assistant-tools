@@ -62,7 +62,7 @@ def test_open_creates_session_and_returns_observation(monkeypatch: pytest.Monkey
     assert requests[1] == (
         "POST",
         "/sessions",
-        {"session_id": "s1", "proxy": None, "fingerprint": None, "live": False},
+        {"session_id": "s1", "live": False},
     )
 
 
