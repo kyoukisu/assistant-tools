@@ -14,6 +14,7 @@ from assistant_tools.models import CommandResult
 from assistant_tools.providers import groq as groq_provider
 from assistant_tools.providers import parallel as parallel_provider
 from assistant_tools.providers import supadata as supadata_provider
+from assistant_tools import shardx as shardx_provider
 from assistant_tools import tts as tts_provider
 from assistant_tools import video as video_provider
 from assistant_tools.tg.config import resolve_tg_config
@@ -180,6 +181,61 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="paplay volume for --play (PulseAudio scale, e.g. 45000)",
     )
+
+    shardx_parser = subparsers.add_parser("shardx", help="ShardX browser control client")
+    shardx_subparsers = shardx_parser.add_subparsers(dest="shardx_command", required=True)
+    shardx_subparsers.add_parser("health", help="Check ShardX API health")
+    shardx_subparsers.add_parser("sessions", help="List active ShardX sessions")
+    shardx_subparsers.add_parser("identities", help="List stored ShardX identities")
+
+    shardx_open = shardx_subparsers.add_parser("open", help="Open a URL")
+    shardx_open.add_argument("url")
+    shardx_open_mode = shardx_open.add_mutually_exclusive_group()
+    shardx_open_mode.add_argument("--identity")
+    shardx_open_mode.add_argument("--session")
+    shardx_open.add_argument("--proxy")
+    shardx_open.add_argument("--fingerprint")
+    shardx_open.add_argument("--live", action="store_true")
+
+    def add_shardx_session(subparser: argparse.ArgumentParser) -> None:
+        subparser.add_argument("--session", required=True)
+
+    shardx_observe = shardx_subparsers.add_parser("observe", help="Observe a session")
+    add_shardx_session(shardx_observe)
+    shardx_read = shardx_subparsers.add_parser("read", help="Read sanitized page content")
+    add_shardx_session(shardx_read)
+    shardx_read.add_argument("--full-page", action="store_true")
+    shardx_read.add_argument("--region", choices=["auto", "main", "page"], default="auto")
+    shardx_read.add_argument("--max-chars", type=int, default=6000)
+    shardx_read.add_argument("--max-blocks", type=int, default=40)
+
+    shardx_act = shardx_subparsers.add_parser("act", help="Act on an opaque control ref")
+    add_shardx_session(shardx_act)
+    shardx_act.add_argument("snapshot")
+    shardx_act.add_argument("ref")
+    shardx_act.add_argument("action", choices=["click", "fill", "type"])
+    shardx_act.add_argument("--text")
+    shardx_act.add_argument("--append", action="store_true")
+
+    shardx_page = shardx_subparsers.add_parser("page", help="Perform a page-level action")
+    add_shardx_session(shardx_page)
+    shardx_page.add_argument("action", choices=["scroll", "press", "back", "reload", "wait"])
+    shardx_page.add_argument("--direction", choices=["up", "down"], default="down")
+    shardx_page.add_argument("--pages", type=float, default=1.0)
+    shardx_page.add_argument("--key")
+    shardx_page.add_argument("--seconds", type=float, default=3.0)
+
+    shardx_tabs = shardx_subparsers.add_parser("tabs", help="List or select tabs")
+    add_shardx_session(shardx_tabs)
+    shardx_tabs.add_argument("--select")
+    shardx_close_tab = shardx_subparsers.add_parser("close-tab", help="Close a tab")
+    add_shardx_session(shardx_close_tab)
+    shardx_close_tab.add_argument("tab")
+    shardx_stop = shardx_subparsers.add_parser("stop", help="Stop a session")
+    add_shardx_session(shardx_stop)
+    shardx_screenshot = shardx_subparsers.add_parser("screenshot", help="Save a PNG screenshot")
+    add_shardx_session(shardx_screenshot)
+    shardx_screenshot.add_argument("--output", type=Path, required=True)
 
     config_parser = subparsers.add_parser("config", help="Show or edit kit configuration")
     config_subparsers = config_parser.add_subparsers(dest="config_command")
@@ -1132,6 +1188,8 @@ def dispatch(
         return run_video(args, config, verbose, config_path)
     if args.command == "tts":
         return run_tts(args, config, verbose, config_path)
+    if args.command == "shardx":
+        return shardx_provider.run(args)
     if args.command == "config":
         from assistant_tools.config import DEFAULT_CONFIG_PATH
 
