@@ -1,4 +1,4 @@
-# pyright: reportMissingTypeStubs=false, reportGeneralTypeIssues=false, reportUnknownMemberType=false, reportAttributeAccessIssue=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportArgumentType=false
+# pyright: reportMissingImports=false, reportMissingTypeStubs=false, reportGeneralTypeIssues=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportAttributeAccessIssue=false, reportUnknownVariableType=false, reportUnknownArgumentType=false, reportArgumentType=false
 
 from __future__ import annotations
 
@@ -364,6 +364,57 @@ async def miniapp_main_url(
         )
         return _ok(
             "tg.miniapp.main",
+            {"url": result.url, "sensitive": True},
+            {
+                "bot": bot,
+                "profile": config.profile,
+                "platform": platform,
+                "compact": compact,
+                "fullscreen": fullscreen,
+                "has_start_param": start_param is not None,
+                "sensitive_fields": ["data.url"],
+            },
+        )
+
+
+async def miniapp_menu_url(
+    config: ResolvedTgConfig,
+    bot: str,
+    start_param: str | None,
+    platform: str,
+    compact: bool,
+    fullscreen: bool,
+) -> CommandResult:
+    """Get the short-lived Telegram-issued URL for a bot's menu Mini App."""
+    from telethon.tl.functions.messages import RequestWebViewRequest
+    from telethon.tl.functions.users import GetFullUserRequest
+
+    async with telegram_client(config) as client:
+        input_bot: Any = await _resolve_peer_entity(client, bot)
+        full_user: Any = await client(GetFullUserRequest(id=input_bot))
+        bot_info: Any = getattr(full_user.full_user, "bot_info", None)
+        menu_button: Any = getattr(bot_info, "menu_button", None)
+        menu_url: str | None = getattr(menu_button, "url", None)
+        if not menu_url:
+            raise _error(
+                "miniapp_not_found",
+                f"Bot {bot} does not expose a Mini App menu button",
+                exit_code=3,
+            )
+        result: Any = await client(
+            RequestWebViewRequest(
+                peer=input_bot,
+                bot=input_bot,
+                platform=platform,
+                from_bot_menu=True,
+                url=menu_url,
+                start_param=start_param,
+                compact=compact or None,
+                fullscreen=fullscreen or None,
+            )
+        )
+        return _ok(
+            "tg.miniapp.menu",
             {"url": result.url, "sensitive": True},
             {
                 "bot": bot,

@@ -229,6 +229,21 @@ def build_parser() -> argparse.ArgumentParser:
     tg_miniapp_mode.add_argument(
         "--fullscreen", action="store_true", help="Request fullscreen mode"
     )
+    tg_miniapp_menu = tg_miniapp_subparsers.add_parser(
+        "menu", help="Get a launch URL from a bot's Mini App menu button"
+    )
+    tg_miniapp_menu.add_argument("bot", help="Bot username or id")
+    tg_miniapp_menu.add_argument(
+        "--start-param", default=None, help="Optional Mini App start parameter"
+    )
+    tg_miniapp_menu.add_argument(
+        "--platform", choices=["tdesktop", "android", "ios"], default="tdesktop"
+    )
+    tg_miniapp_menu_mode = tg_miniapp_menu.add_mutually_exclusive_group()
+    tg_miniapp_menu_mode.add_argument("--compact", action="store_true", help="Request compact mode")
+    tg_miniapp_menu_mode.add_argument(
+        "--fullscreen", action="store_true", help="Request fullscreen mode"
+    )
 
     tg_dialogs = tg_subparsers.add_parser("dialogs", help="List Telegram dialogs")
     tg_dialogs.add_argument("--limit", type=int, default=20)
@@ -1234,6 +1249,17 @@ def dispatch(
             if args.miniapp_command == "main":
                 return tg_commands.run(
                     tg_commands.miniapp_main_url(
+                        tg_config,
+                        args.bot,
+                        args.start_param,
+                        args.platform,
+                        args.compact,
+                        args.fullscreen,
+                    )
+                )
+            if args.miniapp_command == "menu":
+                return tg_commands.run(
+                    tg_commands.miniapp_menu_url(
                         tg_config,
                         args.bot,
                         args.start_param,

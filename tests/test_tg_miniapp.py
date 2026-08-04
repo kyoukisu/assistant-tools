@@ -79,6 +79,46 @@ def test_miniapp_main_requests_telegram_issued_url(monkeypatch: Any) -> None:
     _check(request.compact is None)
 
 
+def test_miniapp_menu_requests_telegram_issued_url(monkeypatch: Any) -> None:
+    bot = SimpleNamespace(id=42)
+
+    class MenuClient(_FakeClient):
+        async def __call__(self, request: Any) -> Any:
+            self.requests.append(request)
+            if type(request).__name__ == "GetFullUserRequest":
+                menu_button = SimpleNamespace(url="https://menu.example.invalid/app")
+                bot_info = SimpleNamespace(menu_button=menu_button)
+                return SimpleNamespace(full_user=SimpleNamespace(bot_info=bot_info))
+            return SimpleNamespace(url="https://example.invalid/#test-menu-launch-url")
+
+    client = MenuClient()
+
+    async def fake_resolve_peer_entity(client: Any, peer: str) -> Any:
+        _check(peer == "example_bot")
+        return bot
+
+    monkeypatch.setattr(commands, "telegram_client", partial(_fake_telegram_client, client=client))
+    monkeypatch.setattr(commands, "_resolve_peer_entity", fake_resolve_peer_entity)
+
+    result = asyncio.run(
+        commands.miniapp_menu_url(_config(), "example_bot", None, "tdesktop", True, False)
+    )
+
+    _check(result.ok)
+    _check(result.data == {"url": "https://example.invalid/#test-menu-launch-url", "sensitive": True})
+    _check([type(request).__name__ for request in client.requests] == [
+        "GetFullUserRequest",
+        "RequestWebViewRequest",
+    ])
+    request = client.requests[1]
+    _check(request.peer == bot)
+    _check(request.bot == bot)
+    _check(request.url == "https://menu.example.invalid/app")
+    _check(bool(request.from_bot_menu))
+    _check(bool(request.compact))
+    _check(request.fullscreen is None)
+
+
 def test_miniapp_main_parser() -> None:
     args = cli.build_parser().parse_args(
         ["tg", "miniapp", "main", "example_bot", "--compact", "--platform", "ios"]
@@ -90,3 +130,14 @@ def test_miniapp_main_parser() -> None:
     _check(bool(args.compact))
     _check(not bool(args.fullscreen))
     _check(args.platform == "ios")
+
+
+def test_miniapp_menu_parser() -> None:
+    args = cli.build_parser().parse_args(
+        ["tg", "miniapp", "menu", "example_bot", "--fullscreen"]
+    )
+
+    _check(args.miniapp_command == "menu")
+    _check(args.bot == "example_bot")
+    _check(not bool(args.compact))
+    _check(bool(args.fullscreen))
