@@ -66,6 +66,34 @@ def test_open_creates_session_and_returns_observation(monkeypatch: pytest.Monkey
     )
 
 
+def test_identity_open_posts_to_identity_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[tuple[str, str, dict[str, Any] | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        requests.append((request.method, request.url.path, body))
+        if request.url.path == "/identities/anyxpay/open":
+            return httpx.Response(200, json={"status": "ok"})
+        raise AssertionError(f"unexpected request: {request.method} {request.url}")
+
+    client = mock_client(handler)
+    monkeypatch.setattr(ShardxClient, "from_env", classmethod(lambda cls: client))
+    result = dispatch(
+        parse("identity", "open", "anyxpay", "https://app.example.com/launch"),
+        load_config(None),
+        None,
+    )
+    assert result.ok is True
+    assert result.command == "shardx.identity.open"
+    assert requests == [
+        (
+            "POST",
+            "/identities/anyxpay/open",
+            {"url": "https://app.example.com/launch", "live": False},
+        )
+    ]
+
+
 def test_read_preserves_text_response(monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"

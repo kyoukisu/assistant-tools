@@ -230,6 +230,35 @@ def run(args: Any) -> CommandResult:
                 },
                 client.base_url,
             )
+        if command == "identity":
+            sub = str(args.identity_command)
+            name = _part(str(args.name))
+            if sub == "create":
+                body: dict[str, Any] = {"name": str(args.name)}
+                if args.proxy:
+                    body["proxy"] = args.proxy
+                if args.fingerprint:
+                    body["fingerprint"] = args.fingerprint
+                data = client.request_json("POST", "/identities", json=body)
+            elif sub == "open":
+                data = client.request_json(
+                    "POST",
+                    f"/identities/{name}/open",
+                    json={"url": str(args.url), "live": bool(args.live)},
+                )
+            elif sub == "open-last":
+                data = client.request_json("POST", f"/identities/{name}/open-last", json={})
+            elif sub == "status":
+                data = client.request_json("GET", f"/identities/{name}")
+            elif sub == "capture-cookies":
+                data = client.request_json("POST", f"/identities/{name}/capture-cookies", json={})
+            else:
+                raise AssistantToolsError(
+                    f"Unknown ShardX identity command: {sub}",
+                    error_type="unknown_command",
+                    exit_code=2,
+                )
+            return _result(f"identity.{sub}", data, client.base_url)
         session = _part(str(args.session))
         if command == "observe":
             data = client.request_json("GET", f"/sessions/{session}/observe")

@@ -188,6 +188,27 @@ def build_parser() -> argparse.ArgumentParser:
     shardx_subparsers.add_parser("sessions", help="List active ShardX sessions")
     shardx_subparsers.add_parser("identities", help="List stored ShardX identities")
 
+    shardx_identity = shardx_subparsers.add_parser("identity", help="Manage ShardX identities")
+    shardx_identity_subparsers = shardx_identity.add_subparsers(dest="identity_command", required=True)
+    shardx_identity_create = shardx_identity_subparsers.add_parser("create", help="Create an identity")
+    shardx_identity_create.add_argument("name")
+    shardx_identity_create.add_argument("--proxy")
+    shardx_identity_create.add_argument("--fingerprint")
+    shardx_identity_open = shardx_identity_subparsers.add_parser("open", help="Open a URL with an identity")
+    shardx_identity_open.add_argument("name")
+    shardx_identity_open.add_argument("url")
+    shardx_identity_open.add_argument("--live", action="store_true")
+    shardx_identity_open_last = shardx_identity_subparsers.add_parser(
+        "open-last", help="Reopen an identity's last URL"
+    )
+    shardx_identity_open_last.add_argument("name")
+    shardx_identity_status = shardx_identity_subparsers.add_parser("status", help="Show identity status")
+    shardx_identity_status.add_argument("name")
+    shardx_identity_capture = shardx_identity_subparsers.add_parser(
+        "capture-cookies", help="Capture identity cookies"
+    )
+    shardx_identity_capture.add_argument("name")
+
     shardx_open = shardx_subparsers.add_parser("open", help="Open a URL")
     shardx_open.add_argument("url")
     shardx_open_mode = shardx_open.add_mutually_exclusive_group()
