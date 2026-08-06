@@ -237,6 +237,15 @@ def build_parser() -> argparse.ArgumentParser:
     shardx_act.add_argument("action", choices=["click", "fill", "type"])
     shardx_act.add_argument("--text")
     shardx_act.add_argument("--append", action="store_true")
+    shardx_secret_fill = shardx_subparsers.add_parser(
+        "secret-fill", help="Fill a browser control from an environment secret"
+    )
+    add_shardx_session(shardx_secret_fill)
+    shardx_secret_fill.add_argument("snapshot")
+    shardx_secret_fill.add_argument("ref")
+    shardx_secret_fill.add_argument(
+        "--env-var", default="ANYXPAY_PASSWORD", help="Environment variable containing the secret"
+    )
 
     shardx_page = shardx_subparsers.add_parser("page", help="Perform a page-level action")
     add_shardx_session(shardx_page)

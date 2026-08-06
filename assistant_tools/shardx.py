@@ -287,6 +287,33 @@ def run(args: Any) -> CommandResult:
                     "clear": not args.append,
                 },
             )
+        elif command == "secret-fill":
+            env_var = str(args.env_var)
+            if not env_var or not env_var.replace("_", "").isalnum() or not env_var[0].isalpha():
+                raise AssistantToolsError(
+                    "--env-var must be an environment variable name",
+                    error_type="invalid_request",
+                    exit_code=2,
+                )
+            secret = os.environ.get(env_var)
+            if not secret:
+                raise AssistantToolsError(
+                    f"Secret environment variable is missing or empty: {env_var}",
+                    error_type="missing_secret",
+                    exit_code=2,
+                )
+            client.request_json(
+                "POST",
+                f"/sessions/{session}/act",
+                json={
+                    "snapshot": args.snapshot,
+                    "ref": args.ref,
+                    "action": "fill",
+                    "text": secret,
+                    "clear": True,
+                },
+            )
+            data = {"session": args.session, "ref": args.ref, "filled": True}
         elif command == "page":
             body: dict[str, Any] = {}
             if args.action == "scroll":

@@ -94,6 +94,48 @@ def test_identity_open_posts_to_identity_endpoint(monkeypatch: pytest.MonkeyPatc
     ]
 
 
+def test_secret_fill_reads_secret_from_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    requests: list[tuple[str, str, dict[str, Any] | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        requests.append((request.method, request.url.path, body))
+        return httpx.Response(200, json={"ok": True})
+
+    client = mock_client(handler)
+    monkeypatch.setenv("TEST_SHARDX_SECRET", "fixture-secret")
+    monkeypatch.setattr(ShardxClient, "from_env", classmethod(lambda cls: client))
+    result = dispatch(
+        parse(
+            "secret-fill",
+            "--session",
+            "s1",
+            "snap-1",
+            "e_password",
+            "--env-var",
+            "TEST_SHARDX_SECRET",
+        ),
+        load_config(None),
+        None,
+    )
+
+    assert result.ok is True
+    assert result.data == {"session": "s1", "ref": "e_password", "filled": True}
+    assert requests == [
+        (
+            "POST",
+            "/sessions/s1/act",
+            {
+                "snapshot": "snap-1",
+                "ref": "e_password",
+                "action": "fill",
+                "text": "fixture-secret",
+                "clear": True,
+            },
+        )
+    ]
+
+
 def test_read_preserves_text_response(monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
