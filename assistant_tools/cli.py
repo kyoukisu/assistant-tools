@@ -330,6 +330,33 @@ def build_parser() -> argparse.ArgumentParser:
     tg_miniapp_menu_mode.add_argument(
         "--fullscreen", action="store_true", help="Request fullscreen mode"
     )
+    tg_miniapp_open = tg_miniapp_subparsers.add_parser(
+        "open",
+        help="Fetch a fresh Mini App URL and open it in ShardX with a persistent identity",
+    )
+    tg_miniapp_open.add_argument("bot", help="Bot username or id")
+    tg_miniapp_open.add_argument(
+        "--identity", required=True, help="ShardX identity name to open the app with"
+    )
+    tg_miniapp_open.add_argument(
+        "--source", choices=["menu", "main"], default="menu", help="Which Mini App entry to use"
+    )
+    tg_miniapp_open.add_argument(
+        "--start-param", default=None, help="Optional Mini App start parameter"
+    )
+    tg_miniapp_open.add_argument(
+        "--platform", choices=["tdesktop", "android", "ios"], default="tdesktop"
+    )
+    tg_miniapp_open_mode = tg_miniapp_open.add_mutually_exclusive_group()
+    tg_miniapp_open_mode.add_argument("--compact", action="store_true", help="Request compact mode")
+    tg_miniapp_open_mode.add_argument(
+        "--fullscreen", action="store_true", help="Request fullscreen mode"
+    )
+    tg_miniapp_open.add_argument(
+        "--wait-ms", type=int, default=2500, help="Seconds to wait for the app to load before observe"
+    )
+    tg_miniapp_open.add_argument("--live", action="store_true", help="Open noVNC live view")
+
 
     tg_dialogs = tg_subparsers.add_parser("dialogs", help="List Telegram dialogs")
     tg_dialogs.add_argument("--limit", type=int, default=20)
@@ -1354,6 +1381,21 @@ def dispatch(
                         args.platform,
                         args.compact,
                         args.fullscreen,
+                    )
+                )
+            if args.miniapp_command == "open":
+                return tg_commands.run(
+                    tg_commands.miniapp_open(
+                        tg_config,
+                        args.bot,
+                        args.identity,
+                        args.source,
+                        args.start_param,
+                        args.platform,
+                        args.compact,
+                        args.fullscreen,
+                        args.wait_ms,
+                        args.live,
                     )
                 )
         if args.tg_command == "find-dialog":

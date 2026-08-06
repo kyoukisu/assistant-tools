@@ -428,6 +428,80 @@ async def miniapp_menu_url(
         )
 
 
+async def miniapp_open(
+    config: ResolvedTgConfig,
+    bot: str,
+    identity: str,
+    source: str,
+    start_param: str | None,
+    platform: str,
+    compact: bool,
+    fullscreen: bool,
+    wait_ms: int,
+    live: bool,
+) -> CommandResult:
+    """Fetch a fresh Mini App URL and open it in ShardX with a persistent identity.
+
+    Runs entirely on the ShardX host so the sensitive launch URL never leaves it.
+    """
+    from urllib.parse import quote
+
+    from assistant_tools.shardx import ShardxClient
+
+    if source == "main":
+        url_result = await miniapp_main_url(
+            config, bot, start_param, platform, compact, fullscreen
+        )
+    else:
+        url_result = await miniapp_menu_url(
+            config, bot, start_param, platform, compact, fullscreen
+        )
+    url: str = str((url_result.data or {}).get("url", ""))
+    if not url:
+        raise _error("miniapp_no_url", f"Mini App {bot} returned no launch URL", exit_code=3)
+
+    client = ShardxClient.from_env()
+    try:
+        opened: dict[str, Any] = client.request_json(
+            "POST",
+            f"/identities/{quote(identity, safe='')}/open",
+            json={"url": url, "live": live},
+        )
+        if wait_ms > 0:
+            client.request_json(
+                "POST",
+                f"/sessions/{quote(identity, safe='')}/wait",
+                json={"seconds": wait_ms / 1000.0},
+            )
+        observation: dict[str, Any] = client.request_json(
+            "GET", f"/sessions/{quote(identity, safe='')}/observe"
+        )
+    finally:
+        client.close()
+
+    return _ok(
+        "tg.miniapp.open",
+        {
+            "session": identity,
+            "identity": identity,
+            "opened": opened,
+            "observation": observation,
+        },
+        {
+            "bot": bot,
+            "profile": config.profile,
+            "identity": identity,
+            "source": source,
+            "platform": platform,
+            "compact": compact,
+            "fullscreen": fullscreen,
+            "wait_ms": wait_ms,
+            "has_start_param": start_param is not None,
+            "sensitive_fields": ["data.url"],
+        },
+    )
+
+
 async def dialogs(config: ResolvedTgConfig, limit: int, full: bool) -> CommandResult:
     async with telegram_client(config) as client:
         items: list[dict[str, Any]] = []
