@@ -275,6 +275,23 @@ def run(args: Any) -> CommandResult:
                 },
             )
             data = {"session": args.session, "text": text}
+        elif command == "read-ref":
+            text = client.request_text(
+                "POST",
+                f"/sessions/{session}/read-ref",
+                json={
+                    "snapshot": args.snapshot,
+                    "ref": args.ref,
+                    "max_chars": args.max_chars,
+                    "max_blocks": args.max_blocks,
+                },
+            )
+            data = {
+                "session": args.session,
+                "snapshot": args.snapshot,
+                "ref": args.ref,
+                "text": text,
+            }
         elif command == "act":
             data = client.request_json(
                 "POST",
@@ -351,14 +368,19 @@ def run(args: Any) -> CommandResult:
         elif command == "stop":
             data = client.request_json("POST", f"/sessions/{session}/stop", json={})
         elif command == "screenshot":
+            query = "?format=png"
+            if args.annotate:
+                query += f"&annotate=true&snapshot={_part(str(args.annotate))}"
             output, mime_type = client.download(
-                f"/sessions/{session}/screenshot?format=png", args.output
+                f"/sessions/{session}/screenshot{query}", args.output
             )
             data = {
                 "session": args.session,
                 "path": str(output),
                 "mime_type": mime_type,
                 "bytes": output.stat().st_size,
+                "annotated": bool(args.annotate),
+                "snapshot": args.annotate,
             }
         else:
             raise AssistantToolsError(

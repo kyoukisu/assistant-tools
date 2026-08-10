@@ -229,6 +229,14 @@ def build_parser() -> argparse.ArgumentParser:
     shardx_read.add_argument("--region", choices=["auto", "main", "page"], default="auto")
     shardx_read.add_argument("--max-chars", type=int, default=6000)
     shardx_read.add_argument("--max-blocks", type=int, default=40)
+    shardx_read_ref = shardx_subparsers.add_parser(
+        "read-ref", help="Read sanitized content scoped to a current control ref"
+    )
+    add_shardx_session(shardx_read_ref)
+    shardx_read_ref.add_argument("snapshot")
+    shardx_read_ref.add_argument("ref")
+    shardx_read_ref.add_argument("--max-chars", type=int, default=2000)
+    shardx_read_ref.add_argument("--max-blocks", type=int, default=20)
 
     shardx_act = shardx_subparsers.add_parser("act", help="Act on an opaque control ref")
     add_shardx_session(shardx_act)
@@ -266,6 +274,10 @@ def build_parser() -> argparse.ArgumentParser:
     shardx_screenshot = shardx_subparsers.add_parser("screenshot", help="Save a PNG screenshot")
     add_shardx_session(shardx_screenshot)
     shardx_screenshot.add_argument("--output", type=Path, required=True)
+    shardx_screenshot.add_argument(
+        "--annotate", metavar="SNAPSHOT", default=None,
+        help="Overlay opaque control refs from this observation snapshot",
+    )
 
     config_parser = subparsers.add_parser("config", help="Show or edit kit configuration")
     config_subparsers = config_parser.add_subparsers(dest="config_command")
