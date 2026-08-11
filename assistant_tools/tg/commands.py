@@ -462,7 +462,7 @@ async def miniapp_open(
 
     client = ShardxClient.from_env()
     try:
-        opened: dict[str, Any] = client.request_json(
+        client.request_json(
             "POST",
             f"/identities/{quote(identity, safe='')}/open",
             json={"url": url, "live": live},
@@ -479,13 +479,19 @@ async def miniapp_open(
     finally:
         client.close()
 
+    # Return only the fields needed to continue through ShardX. In particular,
+    # never serialize the Telegram launch URL returned by either API call.
+    safe_observation: dict[str, Any] = {
+        key: observation[key]
+        for key in ("session", "snapshot", "title", "controls", "outcome", "recovery")
+        if key in observation
+    }
     return _ok(
         "tg.miniapp.open",
         {
             "session": identity,
             "identity": identity,
-            "opened": opened,
-            "observation": observation,
+            "observation": safe_observation,
         },
         {
             "bot": bot,

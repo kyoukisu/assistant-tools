@@ -365,7 +365,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--fullscreen", action="store_true", help="Request fullscreen mode"
     )
     tg_miniapp_open.add_argument(
-        "--wait-ms", type=int, default=2500, help="Seconds to wait for the app to load before observe"
+        "--wait-ms", type=int, default=2500, help="Milliseconds to wait before observing the app"
     )
     tg_miniapp_open.add_argument("--live", action="store_true", help="Open noVNC live view")
 

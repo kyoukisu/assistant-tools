@@ -150,7 +150,12 @@ def test_miniapp_open_fetches_url_and_opens_identity(monkeypatch: Any) -> None:
             if method == "POST" and path.endswith("/wait"):
                 return {"status": "ok"}
             if method == "GET" and path.endswith("/observe"):
-                return {"snapshot": "snap-1", "controls": []}
+                return {
+                    "snapshot": "snap-1",
+                    "url": "https://example.invalid/#secret-launch-url",
+                    "title": "Example App",
+                    "controls": [],
+                }
             return {"status": "ok"}
 
         def close(self) -> None:
@@ -167,8 +172,16 @@ def test_miniapp_open_fetches_url_and_opens_identity(monkeypatch: Any) -> None:
     )
 
     _check(result.ok)
-    _check(result.data["session"] == "ident")
-    _check(result.data["observation"] == {"snapshot": "snap-1", "controls": []})
+    data = result.data
+    _check(data is not None)
+    assert data is not None
+    _check(data["session"] == "ident")
+    _check(
+        data["observation"]
+        == {"snapshot": "snap-1", "title": "Example App", "controls": []}
+    )
+    _check("opened" not in data)
+    _check("secret-launch-url" not in str(data))
     _check([type(request).__name__ for request in client.requests] == [
         "GetFullUserRequest",
         "RequestWebViewRequest",
