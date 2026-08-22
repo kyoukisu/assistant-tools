@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from assistant_tools.cli import _exa_search_type
 from assistant_tools.cli import build_parser
 from assistant_tools.providers import exa
 
@@ -32,6 +33,12 @@ class Client:
     def post(self, url: str, *, headers: dict[str, str], json: dict[str, Any]) -> Response:
         self.requests.append({"url": url, "headers": headers, "json": json})
         return Response(self.payload)
+
+
+def test_legacy_agentic_mode_does_not_enable_exa_deep_search() -> None:
+    assert _exa_search_type("agentic", "auto") == "auto"
+    assert _exa_search_type("one-shot", "auto") == "auto"
+    assert _exa_search_type("fast", "auto") == "fast"
 
 
 def test_cli_exposes_provider_override_for_search_and_extract() -> None:
