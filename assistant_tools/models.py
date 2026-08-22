@@ -25,7 +25,10 @@ class SttConfig:
 
 @dataclass(slots=True)
 class SearchConfig:
+    provider: str = "parallel"
     mode: str = "agentic"
+    exa_type: str = "auto"
+    exa_highlights: bool = True
     max_results: int = 5
     max_chars_per_result: int = 4000
     max_chars_total: int = 12000
@@ -33,6 +36,7 @@ class SearchConfig:
 
 @dataclass(slots=True)
 class ExtractConfig:
+    provider: str = "parallel"
     full_content: bool = False
     max_chars_per_result: int = 5000
 

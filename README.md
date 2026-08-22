@@ -12,8 +12,8 @@ Current command groups:
 
 - `stt` — speech to text via Groq `whisper-large-v3`
 - `tts` — local English-only text to speech via KittenTTS
-- `search` — web search via Parallel
-- `extract` — URL extraction via Parallel
+- `search` — web search via Parallel or Exa
+- `extract` — URL extraction via Parallel or Exa
 - `vtt` — video to text via Supadata
 - `video` — local video/GIF to frames plus optional audio transcript
 - `tg` — Telegram CLI via Telethon
@@ -99,7 +99,8 @@ If you do not install that extra dependency, every non-TTS command still works, 
 These are expected via environment variables:
 
 - `GROQ_API_KEY`
-- `PARALLEL_API_KEY`
+- `PARALLEL_API_KEY` (required only for the Parallel web provider)
+- `EXA_API_KEY` (required only for the Exa web provider)
 - `SUPADATA_API_KEY`
 - `TELEGRAM_API_ID`
 - `TELEGRAM_API_HASH`
@@ -128,6 +129,25 @@ If you want proxying for `stt`, `search`, `extract`, `vtt`, or transcript-enable
 timeout_seconds = 60
 proxy = "http://127.0.0.1:7897"
 ```
+
+### Web providers
+
+`search` and `extract` select a provider independently. The default remains `parallel` for compatibility. Override one command with `--provider parallel` or `--provider exa`.
+
+```toml
+[search]
+provider = "exa"
+exa_type = "auto"
+exa_highlights = true
+max_results = 5
+
+[extract]
+provider = "exa"
+full_content = false
+max_chars_per_result = 5000
+```
+
+The Exa search path requests at most the configured URL results and compact highlights only: it does not request page text, summaries, subpages, or link extras. Exa extraction requests one bounded text representation per URL by default. `--full-content` is the explicit opt-in for unbounded text; Exa does not apply `--objective`, and reports that in result metadata instead of spending on an LLM summary.
 
 ## Quick usage
 
@@ -173,7 +193,7 @@ kit tts "Play louder once." --play --volume 52000
 
 ```bash
 kit search "parallel ai extract api"
-kit search "nixos home manager sops" --domain nixos.org --domain github.com
+kit search "nixos home manager sops" --provider exa --domain nixos.org --domain github.com
 kit search "zed release notes" --after-date 2026-01-01
 ```
 
@@ -181,7 +201,7 @@ kit search "zed release notes" --after-date 2026-01-01
 
 ```bash
 kit extract https://docs.parallel.ai/getting-started/overview
-kit extract https://example.com/post --objective "extract pricing and auth details"
+kit extract https://example.com/post --provider exa
 kit extract https://example.com/post --full-content
 ```
 

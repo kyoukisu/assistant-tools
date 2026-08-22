@@ -11,6 +11,7 @@ from assistant_tools.config import config_snapshot
 from assistant_tools.config import load_config
 from assistant_tools.models import AppConfig
 from assistant_tools.models import CommandResult
+from assistant_tools.providers import exa as exa_provider
 from assistant_tools.providers import groq as groq_provider
 from assistant_tools.providers import parallel as parallel_provider
 from assistant_tools.providers import supadata as supadata_provider
@@ -50,8 +51,9 @@ def build_parser() -> argparse.ArgumentParser:
     stt_parser.add_argument("--model", default=None, help="Groq model override")
     stt_parser.add_argument("--prompt", default=None, help="Optional spelling/context prompt")
 
-    search_parser = subparsers.add_parser("search", help="Web search via Parallel")
+    search_parser = subparsers.add_parser("search", help="Web search via the configured provider")
     search_parser.add_argument("query", help="Search query/objective")
+    search_parser.add_argument("--provider", choices=["parallel", "exa"], default=None)
     search_parser.add_argument("--mode", choices=["fast", "one-shot", "agentic"], default=None)
     search_parser.add_argument("--max-results", type=int, default=None)
     search_parser.add_argument("--after-date", default=None, help="Filter after YYYY-MM-DD")
@@ -62,8 +64,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Include domain filter, repeatable",
     )
 
-    extract_parser = subparsers.add_parser("extract", help="URL extract via Parallel")
+    extract_parser = subparsers.add_parser("extract", help="URL extract via the configured provider")
     extract_parser.add_argument("url", nargs="+", help="One or more URLs to extract")
+    extract_parser.add_argument("--provider", choices=["parallel", "exa"], default=None)
     extract_parser.add_argument("--objective", default=None, help="Optional extraction objective")
     extract_parser.add_argument("--full-content", action="store_true", help="Return full content")
 
@@ -576,39 +579,74 @@ def run_stt(
     )
 
 
+def _web_provider(configured_provider: str, override: str | None) -> str:
+    provider: str = override or configured_provider
+    if provider not in {"parallel", "exa"}:
+        raise AssistantToolsError(
+            f"Unsupported web provider: {provider}",
+            error_type="invalid_provider",
+            exit_code=2,
+        )
+    return provider
+
+
+def _exa_search_type(mode: str | None, configured_type: str) -> str:
+    # Keep the legacy Parallel modes compatible without silently opting into Exa deep search.
+    if mode == "fast":
+        return "fast"
+    return configured_type
+
+
 def run_search(
     args: argparse.Namespace,
     config: AppConfig,
     verbose: bool,
     config_path: Path | None,
 ) -> CommandResult:
-    api_key: str = require_env("PARALLEL_API_KEY")
+    provider: str = _web_provider(config.search.provider, args.provider)
     mode: str = args.mode or config.search.mode
     max_results: int = args.max_results or config.search.max_results
     include_domains: list[str] = args.domain or []
+    exa_type: str | None = None
 
-    payload: dict[str, Any] = parallel_provider.search(
-        api_key=api_key,
-        objective=args.query,
-        timeout_seconds=config.network.timeout_seconds,
-        mode=mode,
-        max_results=max_results,
-        after_date=args.after_date,
-        include_domains=include_domains,
-        max_chars_per_result=config.search.max_chars_per_result,
-        max_chars_total=config.search.max_chars_total,
-        proxy=config.network.proxy or None,
-    )
+    if provider == "parallel":
+        payload: dict[str, Any] = parallel_provider.search(
+            api_key=require_env("PARALLEL_API_KEY"),
+            objective=args.query,
+            timeout_seconds=config.network.timeout_seconds,
+            mode=mode,
+            max_results=max_results,
+            after_date=args.after_date,
+            include_domains=include_domains,
+            max_chars_per_result=config.search.max_chars_per_result,
+            max_chars_total=config.search.max_chars_total,
+            proxy=config.network.proxy or None,
+        )
+    else:
+        exa_type = _exa_search_type(args.mode, config.search.exa_type)
+        payload = exa_provider.search(
+            api_key=require_env("EXA_API_KEY"),
+            query=args.query,
+            timeout_seconds=config.network.timeout_seconds,
+            search_type=exa_type,
+            max_results=max_results,
+            after_date=args.after_date,
+            include_domains=include_domains,
+            highlights=config.search.exa_highlights,
+            proxy=config.network.proxy or None,
+        )
+
     return CommandResult(
         ok=True,
         command="search",
-        provider="parallel",
+        provider=provider,
         data=payload,
         error=None,
         meta={
             **_meta("search", config, config_path, verbose),
             "query": args.query,
             "mode": mode,
+            "exa_type": exa_type,
             "max_results": max_results,
             "domains": include_domains,
             "after_date": args.after_date,
@@ -622,29 +660,42 @@ def run_extract(
     verbose: bool,
     config_path: Path | None,
 ) -> CommandResult:
-    api_key: str = require_env("PARALLEL_API_KEY")
+    provider: str = _web_provider(config.extract.provider, args.provider)
     urls: list[str] = [str(item) for item in args.url]
+    full_content: bool = bool(args.full_content or config.extract.full_content)
 
-    payload: dict[str, Any] = parallel_provider.extract(
-        api_key=api_key,
-        urls=urls,
-        objective=args.objective,
-        timeout_seconds=config.network.timeout_seconds,
-        full_content=bool(args.full_content or config.extract.full_content),
-        max_chars_per_result=config.extract.max_chars_per_result,
-        proxy=config.network.proxy or None,
-    )
+    if provider == "parallel":
+        payload: dict[str, Any] = parallel_provider.extract(
+            api_key=require_env("PARALLEL_API_KEY"),
+            urls=urls,
+            objective=args.objective,
+            timeout_seconds=config.network.timeout_seconds,
+            full_content=full_content,
+            max_chars_per_result=config.extract.max_chars_per_result,
+            proxy=config.network.proxy or None,
+        )
+    else:
+        payload = exa_provider.extract(
+            api_key=require_env("EXA_API_KEY"),
+            urls=urls,
+            timeout_seconds=config.network.timeout_seconds,
+            full_content=full_content,
+            max_chars_per_result=config.extract.max_chars_per_result,
+            proxy=config.network.proxy or None,
+        )
+
     return CommandResult(
         ok=True,
         command="extract",
-        provider="parallel",
+        provider=provider,
         data=payload,
         error=None,
         meta={
             **_meta("extract", config, config_path, verbose),
             "urls": urls,
             "objective": args.objective,
-            "full_content": bool(args.full_content or config.extract.full_content),
+            "objective_applied": provider == "parallel",
+            "full_content": full_content,
         },
     )
 
