@@ -55,12 +55,10 @@ class VttConfig:
 
 @dataclass(slots=True)
 class TtsConfig:
-    backend: str = "openrouter"
     model: str = "google/gemini-3.8-flash-lite-tts"
     voice: str = "Kore"
     language: str = ""
     speed: float = 1.05
-    clean_text: bool = False
     autoplay: bool = True
     volume: int = 45000
     output_dir: str = "~/.local/state/assistant-tools/tts"

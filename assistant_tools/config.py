@@ -18,6 +18,7 @@ from assistant_tools.models import VideoConfig
 from assistant_tools.models import VttConfig
 
 
+RETIRED_TTS_KEYS: frozenset[str] = frozenset({"backend", "clean_text"})
 DEFAULT_CONFIG_PATH: Path = Path("~/.config/assistant-tools/config.toml").expanduser()
 
 
@@ -53,7 +54,12 @@ def load_config(config_path: Path | None = None) -> AppConfig:
     search_config: SearchConfig = SearchConfig(**_section(raw, "search"))
     extract_config: ExtractConfig = ExtractConfig(**_section(raw, "extract"))
     vtt_config: VttConfig = VttConfig(**_section(raw, "vtt"))
-    tts_config: TtsConfig = TtsConfig(**_section(raw, "tts"))
+    # backend/clean_text belonged to the removed local engines; old configs still carry them.
+    tts_section: dict[str, Any] = {
+        key: value for key, value in _section(raw, "tts").items()
+        if key not in RETIRED_TTS_KEYS
+    }
+    tts_config: TtsConfig = TtsConfig(**tts_section)
     video_config: VideoConfig = VideoConfig(**_section(raw, "video"))
     tg_section: dict[str, Any] = _section(raw, "tg")
     raw_profiles: Any = tg_section.pop("profiles", {})

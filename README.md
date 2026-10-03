@@ -97,10 +97,6 @@ Optional:
 
 - `TELEGRAM_SESSION_STRING`
 
-DeepInfra (optional):
-
-- `DEEPINFRA_TOKEN`
-
 ## Config
 
 Default config path:

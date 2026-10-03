@@ -155,19 +155,12 @@ def build_parser() -> argparse.ArgumentParser:
         "tts", help="Text to speech via OpenRouter"
     )
     tts_parser.add_argument("text", help="Text to synthesize")
-    tts_parser.add_argument("--backend", default=None, help=argparse.SUPPRESS)
     tts_parser.add_argument("--voice", default=None, help="Voice name override")
     tts_parser.add_argument("--model", default=None, help="TTS model override")
     tts_parser.add_argument(
         "--language", default=None, help="Language code override, e.g. en or ru"
     )
-    tts_parser.add_argument("--speed", type=float, default=None, help="Speech speed")
-    tts_parser.add_argument(
-        "--clean-text",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Normalize text automatically before synthesis",
-    )
+    tts_parser.add_argument("--speed", type=float, default=None, help="Speech speed multiplier, sent to the API; the default Gemini TTS ignores it")
     tts_parser.add_argument(
         "--save",
         action="store_true",
@@ -463,17 +456,10 @@ def build_parser() -> argparse.ArgumentParser:
     tg_speak.add_argument("text", help="Text to synthesize and send")
     tg_speak.add_argument("--caption", default=None, help="Optional caption")
     tg_speak.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
-    tg_speak.add_argument("--backend", default=None, help=argparse.SUPPRESS)
     tg_speak.add_argument("--voice", default=None, help="Voice name override")
     tg_speak.add_argument("--model", default=None, help="TTS model override")
     tg_speak.add_argument("--language", default=None, help="Language code override, e.g. en or ru")
-    tg_speak.add_argument("--speed", type=float, default=None, help="Speech speed")
-    tg_speak.add_argument(
-        "--clean-text",
-        action=argparse.BooleanOptionalAction,
-        default=None,
-        help="Normalize text automatically before synthesis",
-    )
+    tg_speak.add_argument("--speed", type=float, default=None, help="Speech speed multiplier, sent to the API; the default Gemini TTS ignores it")
     tg_speak.add_argument("--full", action="store_true", help="Return fuller sent message object")
 
     tg_react = tg_subparsers.add_parser("react", help="React to a message")
@@ -923,12 +909,10 @@ def run_video(
 def run_tts(
     args: argparse.Namespace, config: AppConfig, verbose: bool, config_path: Path | None
 ) -> CommandResult:
-    backend: str = args.backend or config.tts.backend
     model: str = args.model or config.tts.model
     voice: str = args.voice or config.tts.voice
     language: str = args.language if args.language is not None else config.tts.language
     speed: float = args.speed if args.speed is not None else config.tts.speed
-    clean_text: bool = args.clean_text if args.clean_text is not None else config.tts.clean_text
     play: bool = args.play if args.play is not None else config.tts.autoplay
     volume: int = args.volume if args.volume is not None else config.tts.volume
     output: str | None = str(args.output) if args.output is not None else None
@@ -939,25 +923,22 @@ def run_tts(
         model=model,
         voice=voice,
         speed=speed,
-        clean_text=clean_text,
         output=output,
         output_dir=config.tts.output_dir,
         save=save,
         play=play,
         volume=volume,
-        backend=backend,
         language=language,
     )
     return CommandResult(
         ok=True,
         command="tts",
-        provider=str(payload.get("backend") or backend),
+        provider="openrouter",
         data=payload,
         error=None,
         meta={
             **_meta("tts", config, config_path, verbose),
             "text_chars": len(str(args.text)),
-            "backend": str(payload.get("backend") or backend),
             "save": save,
             "play": play,
         },
@@ -971,25 +952,21 @@ def run_tg_speak(
     verbose: bool,
     config_path: Path | None,
 ) -> CommandResult:
-    backend: str = args.backend or config.tts.backend
     model: str = args.model or config.tts.model
     voice: str = args.voice or config.tts.voice
     language: str = args.language if args.language is not None else config.tts.language
     speed: float = args.speed if args.speed is not None else config.tts.speed
-    clean_text: bool = args.clean_text if args.clean_text is not None else config.tts.clean_text
 
     payload: dict[str, Any] = tts_provider.synthesize(
         text=str(args.text),
         model=model,
         voice=voice,
         speed=speed,
-        clean_text=clean_text,
         output=None,
         output_dir=config.tts.output_dir,
         save=True,
         play=False,
         volume=config.tts.volume,
-        backend=backend,
         language=language,
     )
     generated_path: str | None = payload.get("path")
@@ -1015,12 +992,10 @@ def run_tg_speak(
 
     data: dict[str, Any] = dict(voice_result.data or {})
     data["tts"] = {
-        "backend": payload.get("backend") or backend,
         "voice": voice,
         "model": model,
         "language": payload.get("language") or language,
         "speed": speed,
-        "clean_text": clean_text,
         "text_chars": len(str(args.text)),
     }
     meta: dict[str, Any] = dict(voice_result.meta)
@@ -1028,18 +1003,16 @@ def run_tg_speak(
         {
             **_meta("tg.speak", config, config_path, verbose),
             "text_chars": len(str(args.text)),
-            "backend": payload.get("backend") or backend,
             "voice": voice,
             "model": model,
             "language": payload.get("language") or language,
             "speed": speed,
-            "clean_text": clean_text,
         }
     )
     return CommandResult(
         ok=voice_result.ok,
         command="tg.speak",
-        provider=f"{payload.get('backend') or backend}+telethon",
+        provider="openrouter+telethon",
         data=data,
         error=voice_result.error,
         meta=meta,

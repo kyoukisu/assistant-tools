@@ -18,31 +18,6 @@ from assistant_tools.utils import require_stt_api_key
 DEFAULT_TTS_URL: str = "https://openrouter.ai/api/v1/audio/speech"
 DEFAULT_TTS_MODEL: str = "google/gemini-3.8-flash-lite-tts"
 DEFAULT_TTS_VOICE: str = "Kore"
-LOCAL_VOICES: set[str] = {
-    "f1",
-    "f2",
-    "f3",
-    "f4",
-    "f5",
-    "m1",
-    "m2",
-    "m3",
-    "m4",
-    "m5",
-    "rosie",
-    "kiki",
-    "luna",
-    "bella",
-}
-LOCAL_MODELS: set[str] = {
-    "",
-    "supertonic",
-    "supertonic-3",
-    "supertonic3",
-    "kitten",
-    "kittentts",
-}
-
 
 def _resolve_output_path(output: str | None, output_dir: str) -> Path:
     if output:
@@ -61,21 +36,6 @@ def _temporary_output_path() -> Path:
         prefix="assistant-tools-tts-", suffix=".wav", delete=False
     ) as tmp:
         return Path(tmp.name)
-
-
-def _resolve_model(model: str) -> str:
-    value: str = model.strip()
-    lowered: str = value.lower()
-    if lowered in LOCAL_MODELS or "kitten" in lowered:
-        return DEFAULT_TTS_MODEL
-    return value
-
-
-def _resolve_voice(voice: str) -> str:
-    value: str = voice.strip()
-    if not value or value.lower() in LOCAL_VOICES:
-        return DEFAULT_TTS_VOICE
-    return value
 
 
 def _pcm_layout(content_type: str) -> tuple[int, int]:
@@ -173,18 +133,15 @@ def synthesize(
     model: str,
     voice: str,
     speed: float,
-    clean_text: bool,
     output: str | None,
     output_dir: str,
     save: bool,
     play: bool,
     volume: int,
-    backend: str | None = None,
     language: str | None = None,
 ) -> dict[str, Any]:
-    del clean_text, backend
-    selected_model: str = _resolve_model(model)
-    selected_voice: str = _resolve_voice(voice)
+    selected_model: str = model.strip() or DEFAULT_TTS_MODEL
+    selected_voice: str = voice.strip() or DEFAULT_TTS_VOICE
     should_save: bool = save or output is not None
     output_path: Path = (
         _resolve_output_path(output, output_dir) if should_save else _temporary_output_path()
@@ -195,6 +152,7 @@ def synthesize(
         "input": text,
         "voice": selected_voice,
         "response_format": "pcm",
+        "speed": speed,
     }
 
     started: float = time.perf_counter()
@@ -264,7 +222,6 @@ def synthesize(
 
     return {
         "path": str(output_path) if persisted else None,
-        "backend": "openrouter",
         "sample_rate": sample_rate,
         "duration_seconds": round(duration_seconds, 4),
         "generation_seconds": round(generation_seconds, 4),
@@ -273,7 +230,6 @@ def synthesize(
         "voice": selected_voice,
         "language": language or None,
         "speed": speed,
-        "clean_text": None,
         "saved": persisted,
         "played": played,
         "volume": volume if played else None,
