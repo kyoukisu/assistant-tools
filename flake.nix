@@ -24,6 +24,12 @@
               inherit version;
               hash = "sha256-aY2qlhbUbd2v/mW4fbIi8pAhd6LSssC5qTYd9gerNoc=";
             };
+            # Telethon uses the asyncio backend only. trio/curio are optional
+            # python-socks backends, but httpcore imports trio whenever it is
+            # installed: ~0.2s added to every kit HTTP call.
+            dependencies = [ py.async-timeout ];
+            propagatedBuildInputs = [ py.async-timeout ];
+            pythonImportsCheck = [ "python_socks.async_.asyncio" ];
           });
 
           telethon1432 = py.buildPythonPackage rec {

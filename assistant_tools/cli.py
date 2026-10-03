@@ -23,7 +23,6 @@ from assistant_tools import shardx as shardx_provider
 from assistant_tools import tts as tts_provider
 from assistant_tools import video as video_provider
 from assistant_tools.tg.config import resolve_tg_config
-from assistant_tools.tg import commands as tg_commands
 from assistant_tools.utils import AssistantToolsError
 from assistant_tools.utils import emit_result
 from assistant_tools.utils import ensure_path_exists
@@ -1093,6 +1092,8 @@ def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
     """Download voice/audio message and transcribe."""
     import shutil
 
+    from assistant_tools.tg import commands as tg_commands
+
     download_result: CommandResult = tg_commands.run(
         tg_commands.media_download(tg_config, args.peer, [args.message_id], None, False)
     )
@@ -1146,7 +1147,7 @@ def _ensure_daemon(tg_config: Any) -> None:
     """Start the daemon if not already running."""
     import subprocess as _sp
     import time as _t
-    from assistant_tools.tg.daemon import SOCKET_PATH as _SOCK
+    from assistant_tools.tg.ipc import SOCKET_PATH as _SOCK
 
     if _SOCK.exists():
         return
@@ -1172,8 +1173,8 @@ def _ensure_daemon(tg_config: Any) -> None:
 async def _daemon_request(request: dict[str, Any]) -> dict[str, Any]:
     """Send a request to the running daemon and return the response."""
     import asyncio as _aio
-    from assistant_tools.tg.daemon import IPC_STREAM_LIMIT as _IPC_STREAM_LIMIT
-    from assistant_tools.tg.daemon import SOCKET_PATH as _SOCK
+    from assistant_tools.tg.ipc import IPC_STREAM_LIMIT as _IPC_STREAM_LIMIT
+    from assistant_tools.tg.ipc import SOCKET_PATH as _SOCK
 
     if not _SOCK.exists():
         return {"ok": False, "error": "daemon not running (no socket)"}
@@ -1196,7 +1197,7 @@ def _daemon_response_is_locked(response: dict[str, Any]) -> bool:
 
 def _request_daemon_with_recovery(request: dict[str, Any], tg_config: Any) -> dict[str, Any]:
     import time as _t
-    from assistant_tools.tg.daemon import SOCKET_PATH as _SOCK
+    from assistant_tools.tg.ipc import SOCKET_PATH as _SOCK
 
     resp = _asyncio.run(_daemon_request(request))
     error = str(resp.get("error", ""))
@@ -1261,7 +1262,7 @@ def _send_voice_via_daemon(
 
 def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
     """Try to proxy command through daemon. Returns None to fall through to direct."""
-    from assistant_tools.tg.daemon import SOCKET_PATH as _SOCK
+    from assistant_tools.tg.ipc import SOCKET_PATH as _SOCK
 
     # Auto-start daemon on first use
     if not _SOCK.exists():
@@ -1508,6 +1509,10 @@ def dispatch(
             result: CommandResult | None = _daemon_middleware(args, tg_config)
             if result is not None:
                 return result
+
+        # Telethon costs ~0.25s to import. The daemon path above and every
+        # non-Telegram command never need it, so load it only here.
+        from assistant_tools.tg import commands as tg_commands
 
         # Validate video files before send-media (catches corrupted files early)
         if args.tg_command in ("send-media", "send-photo", "send-file"):

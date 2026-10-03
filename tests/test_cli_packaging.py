@@ -40,3 +40,17 @@ def test_video_parser_exposes_explicit_timestamp_flag() -> None:
     assert video_parser is not None
     action_flags = {flag for action in video_parser._actions for flag in action.option_strings}
     assert "--at" in action_flags
+
+
+def test_non_telegram_commands_do_not_import_telethon() -> None:
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys, assistant_tools.cli, assistant_tools.tg.ipc; "
+        "print('telethon' in sys.modules)"
+    )
+    output = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, check=True
+    ).stdout.strip()
+    assert output == "False"

@@ -8,7 +8,6 @@ import fcntl
 import json
 import os
 import shutil
-import tempfile
 import time as _time
 import traceback
 from pathlib import Path
@@ -22,10 +21,10 @@ from assistant_tools.tg.client import _get_daemon_client
 from assistant_tools.tg.client import _set_daemon_client
 from assistant_tools.tg.client import make_client
 from assistant_tools.tg.config import ResolvedTgConfig
+from assistant_tools.tg.ipc import IPC_STREAM_LIMIT as IPC_STREAM_LIMIT
+from assistant_tools.tg.ipc import LOCK_PATH as LOCK_PATH
+from assistant_tools.tg.ipc import SOCKET_PATH as SOCKET_PATH
 
-SOCKET_PATH: Path = Path(tempfile.gettempdir()) / "kit-tg-daemon.sock"
-LOCK_PATH: Path = Path(tempfile.gettempdir()) / "kit-tg-daemon.lock"
-IPC_STREAM_LIMIT: int = 16 * 1024 * 1024
 IDLE_TIMEOUT: float = 600.0  # 10 minutes
 
 _last_activity: float = 0.0

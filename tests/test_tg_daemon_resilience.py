@@ -9,6 +9,7 @@ from typing import Any
 
 from assistant_tools import cli
 from assistant_tools.tg import daemon
+from assistant_tools.tg import ipc
 
 
 def test_daemon_lock_allows_only_one_owner(tmp_path: Path) -> None:
@@ -93,7 +94,7 @@ def test_daemon_request_accepts_large_response(
 ) -> None:
     async def run() -> None:
         socket_path = tmp_path / "large-response.sock"
-        monkeypatch.setattr(daemon, "SOCKET_PATH", socket_path)
+        monkeypatch.setattr(ipc, "SOCKET_PATH", socket_path)
 
         async def respond(
             reader: asyncio.StreamReader, writer: asyncio.StreamWriter
