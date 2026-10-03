@@ -40,15 +40,3 @@ def test_video_parser_exposes_explicit_timestamp_flag() -> None:
     assert video_parser is not None
     action_flags = {flag for action in video_parser._actions for flag in action.option_strings}
     assert "--at" in action_flags
-
-
-
-def test_kitten_tts_extra_is_declared() -> None:
-    import tomllib
-    from pathlib import Path
-
-    pyproject = tomllib.loads(Path("pyproject.toml").read_text())
-    assert pyproject["project"]["optional-dependencies"]["kitten-tts"] == ["kittentts"]
-    source = pyproject["tool"]["uv"]["sources"]["kittentts"]
-    assert source["git"] == "https://github.com/KittenML/KittenTTS"
-    assert source["rev"] == "395171a68d5c73a50027436988fb856c30c748b8"

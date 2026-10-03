@@ -10,10 +10,18 @@ from assistant_tools.models import CommandResult
 
 
 class AssistantToolsError(Exception):
-    def __init__(self, message: str, *, error_type: str, exit_code: int = 1) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_type: str,
+        exit_code: int = 1,
+        status_code: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.error_type: str = error_type
         self.exit_code: int = exit_code
+        self.status_code: int | None = status_code
 
 
 def require_env(name: str) -> str:
@@ -25,6 +33,29 @@ def require_env(name: str) -> str:
             exit_code=3,
         )
     return value
+
+
+def require_stt_api_key(configured_key: str = "") -> str:
+    if configured_key:
+        return configured_key
+    for name in ("OPENROUTER_API_KEY", "GROQ_API_KEY"):
+        value: str | None = os.environ.get(name)
+        if value:
+            return value
+    raise AssistantToolsError(
+        "Missing required environment variable: OPENROUTER_API_KEY",
+        error_type="missing_env",
+        exit_code=3,
+    )
+
+
+def stt_provider_name(url: str = "") -> str:
+    lowered: str = url.lower()
+    if "openrouter.ai" in lowered:
+        return "openrouter"
+    if "groq.com" in lowered:
+        return "groq"
+    return "stt"
 
 
 def is_url(value: str) -> bool:

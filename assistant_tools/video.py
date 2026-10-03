@@ -11,10 +11,10 @@ import subprocess
 from typing import Any
 from typing import cast
 
-from assistant_tools.providers import groq as groq_provider
+from assistant_tools import stt as stt_provider
 from assistant_tools.utils import AssistantToolsError
 from assistant_tools.utils import ensure_path_exists
-from assistant_tools.utils import require_env
+from assistant_tools.utils import require_stt_api_key
 
 
 @dataclass(slots=True)
@@ -371,11 +371,11 @@ def transcribe_audio(
     api_key: str = "",
     url: str | None = None,
 ) -> dict[str, Any]:
-    resolved_api_key: str = api_key or require_env("GROQ_API_KEY")
-    return groq_provider.transcribe(
+    resolved_api_key: str = require_stt_api_key(api_key)
+    return stt_provider.transcribe_file(
         api_key=resolved_api_key,
         source=str(audio_path),
-        timeout_seconds=timeout_seconds,
+        timeout_seconds=max(float(timeout_seconds), 180.0),
         model=model,
         language=language,
         timestamps=timestamps,

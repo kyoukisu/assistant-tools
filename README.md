@@ -10,10 +10,11 @@ kit
 
 Current command groups:
 
-- `stt` — speech to text via Groq `whisper-large-v3`
-- `tts` — local English-only text to speech via KittenTTS
-- `search` — web search via Parallel or Exa
-- `extract` — URL extraction via Parallel or Exa
+- `stt` — speech to text through an OpenAI-compatible endpoint (OpenRouter Qwen3 ASR by default); long local media is split on pauses and paged
+- `tts` — text to speech through OpenRouter
+- `search` — web search via Keenable, Exa, or Parallel with a fallback chain
+- `extract` — URL extraction via Keenable, Exa, or Parallel with a fallback chain
+- `shardx` — client for a local ShardX-compatible browser control service
 - `vtt` — video to text via Supadata
 - `video` — local video/GIF to frames plus optional audio transcript
 - `tg` — Telegram CLI via Telethon
@@ -78,27 +79,14 @@ Use it from Home Manager:
 }
 ```
 
-This path is the recommended declarative install method on NixOS. Runtime state such as Telegram session files, caches, and downloaded TTS models still lives outside the Nix store.
-
-## TTS add-on
-
-The core package is now publishable-friendly. The `tts` command depends on upstream KittenTTS and keeps that dependency behind the explicit `kitten-tts` extra.
-
-If you want `tts`, install the package with its `kitten-tts` extra:
-
-```bash
-uv tool install 'assistant-tools[kitten-tts] @ git+https://github.com/kyoukisu/assistant-tools'
-```
-
-With the current upstream KittenTTS source, a clean install with this extra is roughly `300MB` for the tool environment itself, plus the selected model download on first use (for example about `41MB` for `kitten-tts-micro-0.8`, so about `350MB` total in that default case).
-
-If you do not install that extra dependency, every non-TTS command still works, and `tts` fails with a direct JSON error telling you what is missing.
+This path is the recommended declarative install method on NixOS. Runtime state such as Telegram session files and STT caches still lives outside the Nix store.
 
 ## Secrets
 
 These are expected via environment variables:
 
-- `GROQ_API_KEY`
+- `OPENROUTER_API_KEY` (STT and TTS; `GROQ_API_KEY` is still accepted for STT)
+- `KEENABLE_API_KEY` (required only for the Keenable web provider)
 - `PARALLEL_API_KEY` (required only for the Parallel web provider)
 - `EXA_API_KEY` (required only for the Exa web provider)
 - `SUPADATA_API_KEY`
@@ -132,7 +120,7 @@ proxy = "http://127.0.0.1:7897"
 
 ### Web providers
 
-`search` and `extract` select a provider independently. The default remains `parallel` for compatibility. Override one command with `--provider parallel` or `--provider exa`.
+`search` and `extract` select a provider independently, with optional `fallback_providers` tried on retryable failures. Override one command with `--provider keenable|exa|parallel` (no fallback).
 
 ```toml
 [search]
@@ -161,33 +149,13 @@ kit stt https://example.com/audio.mp3
 
 ### Text to speech
 
-KittenTTS is currently English-only.
-
 ```bash
-kit tts "Hello, Kyokisu. I can speak now."
-kit tts "I missed you..." --voice Kiki --play
-kit tts "This is the high quality path." --model KittenML/kitten-tts-mini-0.8
-kit tts "Fast response." --model KittenML/kitten-tts-nano-0.8-fp32 --play
-```
-
-Defaults:
-
-- model: `KittenML/kitten-tts-micro-0.8`
-- voice: `Rosie`
-- autoplay: on
-- by default it does **not** keep the WAV file
-- saved output dir: `~/.local/state/assistant-tools/tts`
-
-Useful flags:
-
-```bash
-kit tts "Hello there." --save
-kit tts "Hello there." --save --no-play
+kit tts "Hello there."
+kit tts "Привет" --voice Kore --language ru --no-play --save
 kit tts "Hello there." --output /tmp/hello.wav --no-play
-kit tts "Say it slower." --speed 0.9
-kit tts "Normalize 2026 for me." --clean-text
-kit tts "Play louder once." --play --volume 52000
 ```
+
+Defaults: model `google/gemini-3.8-flash-lite-tts`, voice `Kore`, autoplay on, WAV kept only with `--save` or `--output`.
 
 ### Web search
 
@@ -320,7 +288,7 @@ kit tg send-file me /tmp/doc.pdf
 kit tg send-photo me /tmp/image.png --caption "see this"
 kit tg send-voice me /tmp/voice.ogg
 kit tg send-voice me /tmp/hello.wav
-kit tg speak me "You can feel the shift before you can name it." --voice Rosie
+kit tg speak me "You can feel the shift before you can name it."
 kit tg wait-next me --timeout-seconds 30
 kit tg react me 123 "🔥"
 kit tg copy me 123 another_chat
@@ -439,7 +407,8 @@ Error shape:
 timeout_seconds = 60
 
 [stt]
-model = "whisper-large-v3"
+url = "https://openrouter.ai/api/v1/audio/transcriptions"
+model = "qwen/qwen3-asr-flash-2026-02-10"
 language = ""
 timestamps = "none"
 temperature = 0.0
@@ -464,10 +433,9 @@ poll_interval_seconds = 1.0
 wait_timeout_seconds = 180.0
 
 [tts]
-model = "KittenML/kitten-tts-micro-0.8"
-voice = "Rosie"
+model = "google/gemini-3.8-flash-lite-tts"
+voice = "Kore"
 speed = 1.0
-clean_text = false
 autoplay = true
 volume = 45000
 output_dir = "~/.local/state/assistant-tools/tts"

@@ -31,60 +31,12 @@
             version = "1.43.2";
             format = "wheel";
             src = pkgs.fetchurl {
-              url = "https://files.pythonhosted.org/packages/7f/0a/1b3f5a9c2d4e6b8a0c5d7e9f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8/telethon-1.43.2-py3-none-any.whl";
+              url = "https://files.pythonhosted.org/packages/37/85/53197127a93fd23a0ec7367a125939cb8c6cc23f0f9f2c0a04692f3ab51d/telethon-1.43.2-py3-none-any.whl";
               hash = "sha256-foojoI+EdPOsDEaEfz7dTpZbRFLeC6hosImsutgEGqQ=";
             };
             propagatedBuildInputs = with py; [ pyaes rsa ];
             pythonImportsCheck = [ "telethon" ];
             doCheck = false;
-          };
-
-          supertonicPkg = py.buildPythonPackage rec {
-            pname = "supertonic";
-            version = "1.2.3";
-            pyproject = true;
-            src = pkgs.fetchPypi {
-              inherit pname version;
-              hash = "sha256-JbpWzv0MnfgxKLtIkiljaQ2rxrlOzPlyvbeitijZCxc=";
-            };
-            build-system = with py; [ setuptools wheel ];
-            propagatedBuildInputs = with py; [
-              huggingface-hub
-              numpy
-              onnxruntime
-              soundfile
-            ];
-            pythonImportsCheck = [ "supertonic" ];
-            doCheck = false;
-          };
-
-          kittenttsPkg = py.buildPythonPackage rec {
-            pname = "kittentts";
-            version = "0.8.1";
-            pyproject = true;
-            src = pkgs.fetchFromGitHub {
-              owner = "KittenML";
-              repo = "KittenTTS";
-              rev = "395171a68d5c73a50027436988fb856c30c748b8";
-              hash = "sha256-T1g3B+pQmxZ0p+qZlyfjmogGhlxx2M/QWF23CzV9dSI=";
-            };
-            build-system = with py; [ setuptools wheel ];
-            postPatch = ''
-              substituteInPlace kittentts/onnx_model.py \
-                --replace-fail "import espeakng_loader" "" \
-                --replace-fail "EspeakWrapper.set_library(espeakng_loader.get_library_path())" "EspeakWrapper.set_library('${pkgs.espeak-ng}/lib/libespeak-ng.so')" \
-                --replace-fail "os.environ['ESPEAK_DATA_PATH'] = espeakng_loader.get_data_path()" "os.environ['ESPEAK_DATA_PATH'] = '${pkgs.espeak-ng}/share/espeak-ng-data'"
-              substituteInPlace pyproject.toml \
-                --replace-fail '    "espeakng_loader",' ""
-            '';
-            propagatedBuildInputs = with py; [
-              phonemizer
-              onnxruntime
-              soundfile
-              numpy
-              huggingface-hub
-            ];
-            pythonImportsCheck = [ "kittentts" ];
           };
         in
         py.buildPythonApplication rec {
@@ -93,18 +45,18 @@
           pyproject = true;
           src = self;
           build-system = with py; [ setuptools ];
+          # numpy + onnxruntime run the Silero VAD that splits long STT input.
           propagatedBuildInputs = with py; [
             cryptg
             httpx
-            soundfile
+            numpy
+            onnxruntime
             socksio
             pyaes
             rsa
           ] ++ [
             pythonSocks281
             telethon1432
-            kittenttsPkg
-            supertonicPkg
           ];
           pythonImportsCheck = [ "assistant_tools" ];
           meta.mainProgram = "assistant-tools";

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import argparse
 import asyncio as _asyncio
+from collections.abc import Callable
 import json
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from assistant_tools import __version__
 from assistant_tools.config import config_snapshot
@@ -12,7 +15,8 @@ from assistant_tools.config import load_config
 from assistant_tools.models import AppConfig
 from assistant_tools.models import CommandResult
 from assistant_tools.providers import exa as exa_provider
-from assistant_tools.providers import groq as groq_provider
+from assistant_tools import stt as stt_provider
+from assistant_tools.providers import keenable as keenable_provider
 from assistant_tools.providers import parallel as parallel_provider
 from assistant_tools.providers import supadata as supadata_provider
 from assistant_tools import shardx as shardx_provider
@@ -26,6 +30,8 @@ from assistant_tools.utils import ensure_path_exists
 from assistant_tools.utils import error_result
 from assistant_tools.utils import is_url
 from assistant_tools.utils import require_env
+from assistant_tools.utils import require_stt_api_key
+from assistant_tools.utils import stt_provider_name
 
 
 DAEMON_LOCKED_ERROR = "database is locked"
@@ -39,7 +45,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    stt_parser = subparsers.add_parser("stt", help="Speech to text via Groq")
+    stt_parser = subparsers.add_parser("stt", help="Speech to text via OpenRouter")
     stt_parser.add_argument("input", help="Audio file path or URL")
     stt_parser.add_argument("--language", default=None, help="Language code override")
     stt_parser.add_argument(
@@ -48,12 +54,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Timestamp granularity",
     )
-    stt_parser.add_argument("--model", default=None, help="Groq model override")
+    stt_parser.add_argument("--model", default=None, help="STT model override")
     stt_parser.add_argument("--prompt", default=None, help="Optional spelling/context prompt")
+    stt_parser.add_argument("--start-seconds", type=float, default=0.0, help="Window start for long files")
+    stt_parser.add_argument("--limit", type=int, default=8, help="Max 45s chunks to return")
 
     search_parser = subparsers.add_parser("search", help="Web search via the configured provider")
     search_parser.add_argument("query", help="Search query/objective")
-    search_parser.add_argument("--provider", choices=["parallel", "exa"], default=None)
+    search_parser.add_argument("--provider", choices=["keenable", "exa", "parallel"], default=None)
     search_parser.add_argument("--mode", choices=["fast", "one-shot", "agentic"], default=None)
     search_parser.add_argument("--max-results", type=int, default=None)
     search_parser.add_argument("--after-date", default=None, help="Filter after YYYY-MM-DD")
@@ -66,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     extract_parser = subparsers.add_parser("extract", help="URL extract via the configured provider")
     extract_parser.add_argument("url", nargs="+", help="One or more URLs to extract")
-    extract_parser.add_argument("--provider", choices=["parallel", "exa"], default=None)
+    extract_parser.add_argument("--provider", choices=["keenable", "exa", "parallel"], default=None)
     extract_parser.add_argument("--objective", default=None, help="Optional extraction objective")
     extract_parser.add_argument("--full-content", action="store_true", help="Return full content")
 
@@ -141,19 +149,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extract frame(s) at explicit second offsets. Repeatable. When provided, overrides auto spreading.",
     )
     video_parser.add_argument("--language", default=None, help="Language code override")
-    video_parser.add_argument("--model", default=None, help="Groq model override")
+    video_parser.add_argument("--model", default=None, help="STT model override")
     video_parser.add_argument("--prompt", default=None, help="Optional spelling/context prompt")
 
     tts_parser = subparsers.add_parser(
-        "tts", help="Local text to speech via Supertonic or KittenTTS"
+        "tts", help="Text to speech via OpenRouter"
     )
     tts_parser.add_argument("text", help="Text to synthesize")
-    tts_parser.add_argument(
-        "--backend",
-        choices=["supertonic", "kittentts", "kitten"],
-        default=None,
-        help="TTS backend override",
-    )
+    tts_parser.add_argument("--backend", default=None, help=argparse.SUPPRESS)
     tts_parser.add_argument("--voice", default=None, help="Voice name override")
     tts_parser.add_argument("--model", default=None, help="TTS model override")
     tts_parser.add_argument(
@@ -220,18 +223,24 @@ def build_parser() -> argparse.ArgumentParser:
     shardx_open.add_argument("--proxy")
     shardx_open.add_argument("--fingerprint")
     shardx_open.add_argument("--live", action="store_true")
+    shardx_open.add_argument("--view", choices=["status", "controls", "content"], required=True)
 
     def add_shardx_session(subparser: argparse.ArgumentParser) -> None:
         subparser.add_argument("--session", required=True)
 
     shardx_observe = shardx_subparsers.add_parser("observe", help="Observe a session")
     add_shardx_session(shardx_observe)
+    shardx_observe.add_argument("--query")
+    shardx_observe.add_argument("--role", dest="roles", action="append", default=[])
+    shardx_observe.add_argument("--snapshot")
+    shardx_observe.add_argument("--cursor", type=int)
     shardx_read = shardx_subparsers.add_parser("read", help="Read sanitized page content")
     add_shardx_session(shardx_read)
     shardx_read.add_argument("--full-page", action="store_true")
     shardx_read.add_argument("--region", choices=["auto", "main", "page"], default="auto")
     shardx_read.add_argument("--max-chars", type=int, default=6000)
     shardx_read.add_argument("--max-blocks", type=int, default=40)
+    shardx_read.add_argument("--cursor", type=int)
     shardx_read_ref = shardx_subparsers.add_parser(
         "read-ref", help="Read sanitized content scoped to a current control ref"
     )
@@ -281,6 +290,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--annotate", metavar="SNAPSHOT", default=None,
         help="Overlay opaque control refs from this observation snapshot",
     )
+    shardx_file = shardx_subparsers.add_parser(
+        "file", help="Set a local file on the first file input of the current page"
+    )
+    add_shardx_session(shardx_file)
+    shardx_file.add_argument("path", type=Path)
+    shardx_walk = shardx_subparsers.add_parser("walk", help="Run one Jev pass on the open page")
+    add_shardx_session(shardx_walk)
+    shardx_walk.add_argument("--brief", required=True)
+    shardx_walk.add_argument("--max-steps", type=int, default=8)
+    shardx_walk.add_argument("--target-materials", type=int)
+    shardx_walk.add_argument("--inputs", type=json.loads)
 
     config_parser = subparsers.add_parser("config", help="Show or edit kit configuration")
     config_subparsers = config_parser.add_subparsers(dest="config_command")
@@ -438,13 +458,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     tg_speak = tg_subparsers.add_parser(
-        "speak", help="Synthesize English speech and send it as a Telegram voice note"
+        "speak", help="Synthesize speech via OpenRouter and send it as a Telegram voice note"
     )
     tg_speak.add_argument("peer", help="Target peer")
-    tg_speak.add_argument("text", help="English text to synthesize and send")
+    tg_speak.add_argument("text", help="Text to synthesize and send")
     tg_speak.add_argument("--caption", default=None, help="Optional caption")
     tg_speak.add_argument("--reply-to", type=int, default=None, help="Reply target message id")
-    tg_speak.add_argument("--backend", choices=["supertonic", "kittentts", "kitten"], default=None)
+    tg_speak.add_argument("--backend", default=None, help=argparse.SUPPRESS)
     tg_speak.add_argument("--voice", default=None, help="Voice name override")
     tg_speak.add_argument("--model", default=None, help="TTS model override")
     tg_speak.add_argument("--language", default=None, help="Language code override, e.g. en or ru")
@@ -545,16 +565,18 @@ def run_stt(
     source: str = str(args.input)
     if not is_url(source):
         ensure_path_exists(source)
-    api_key: str = config.stt.api_key or require_env("GROQ_API_KEY")
+    api_key: str = require_stt_api_key(config.stt.api_key)
     model: str = args.model or config.stt.model
     language: str = args.language if args.language is not None else config.stt.language
     timestamps: str = args.timestamps if args.timestamps is not None else config.stt.timestamps
     prompt: str = args.prompt if args.prompt is not None else config.stt.prompt
+    start_seconds: float = float(getattr(args, "start_seconds", 0.0) or 0.0)
+    limit: int = int(getattr(args, "limit", 8) or 8)
 
-    payload: dict[str, Any] = groq_provider.transcribe(
+    payload: dict[str, Any] = stt_provider.transcribe_window(
         api_key=api_key,
         source=source,
-        timeout_seconds=config.network.timeout_seconds,
+        timeout_seconds=max(float(config.network.timeout_seconds), 180.0),
         model=model,
         language=language,
         timestamps=timestamps,
@@ -562,11 +584,13 @@ def run_stt(
         prompt=prompt,
         proxy=config.network.proxy or None,
         url=config.stt.url or None,
+        start_seconds=start_seconds,
+        limit=limit,
     )
     return CommandResult(
         ok=True,
         command="stt",
-        provider="groq",
+        provider=stt_provider_name(config.stt.url),
         data=payload,
         error=None,
         meta={
@@ -579,15 +603,62 @@ def run_stt(
     )
 
 
+SUPPORTED_WEB_PROVIDERS: frozenset[str] = frozenset({"keenable", "exa", "parallel"})
+RETRYABLE_STATUS_CODES: frozenset[int] = frozenset({402, 408, 429})
+
+
 def _web_provider(configured_provider: str, override: str | None) -> str:
     provider: str = override or configured_provider
-    if provider not in {"parallel", "exa"}:
+    if provider not in SUPPORTED_WEB_PROVIDERS:
         raise AssistantToolsError(
             f"Unsupported web provider: {provider}",
             error_type="invalid_provider",
             exit_code=2,
         )
     return provider
+
+
+def _provider_chain(
+    configured_provider: str, fallback_providers: list[str], override: str | None
+) -> list[str]:
+    primary: str = _web_provider(configured_provider, override)
+    if override:
+        return [primary]
+    providers: list[str] = [primary]
+    for fallback_provider in fallback_providers:
+        provider: str = _web_provider(fallback_provider, None)
+        if provider not in providers:
+            providers.append(provider)
+    return providers
+
+
+def _retryable(error: AssistantToolsError) -> bool:
+    if error.error_type == "missing_env":
+        return True
+    if error.status_code in RETRYABLE_STATUS_CODES:
+        return True
+    return error.status_code is not None and error.status_code >= 500
+
+
+def _run_with_fallback(
+    providers: list[str], invoke: Callable[[str], dict[str, Any]]
+) -> tuple[str, dict[str, Any], list[str]]:
+    attempted: list[str] = []
+    failures: list[str] = []
+    for provider in providers:
+        attempted.append(provider)
+        try:
+            return provider, invoke(provider), attempted
+        except httpx.HTTPError as error:
+            failures.append(f"{provider}: {error}")
+        except AssistantToolsError as error:
+            failures.append(f"{provider}: {error}")
+            if not _retryable(error):
+                raise
+    raise AssistantToolsError(
+        "All configured web providers failed: " + "; ".join(failures),
+        error_type="web_provider_unavailable",
+    )
 
 
 def _exa_search_type(mode: str | None, configured_type: str) -> str:
@@ -603,14 +674,38 @@ def run_search(
     verbose: bool,
     config_path: Path | None,
 ) -> CommandResult:
-    provider: str = _web_provider(config.search.provider, args.provider)
+    providers: list[str] = _provider_chain(
+        config.search.provider, config.search.fallback_providers, args.provider
+    )
     mode: str = args.mode or config.search.mode
     max_results: int = args.max_results or config.search.max_results
     include_domains: list[str] = args.domain or []
-    exa_type: str | None = None
 
-    if provider == "parallel":
-        payload: dict[str, Any] = parallel_provider.search(
+    def invoke(provider: str) -> dict[str, Any]:
+        if provider == "keenable":
+            return keenable_provider.search(
+                api_key=require_env("KEENABLE_API_KEY"),
+                query=args.query,
+                timeout_seconds=config.network.timeout_seconds,
+                max_results=max_results,
+                after_date=args.after_date,
+                include_domains=include_domains,
+                max_chars_per_result=config.search.max_chars_per_result,
+                proxy=config.network.proxy or None,
+            )
+        if provider == "exa":
+            return exa_provider.search(
+                api_key=require_env("EXA_API_KEY"),
+                query=args.query,
+                timeout_seconds=config.network.timeout_seconds,
+                search_type=_exa_search_type(args.mode, config.search.exa_type),
+                max_results=max_results,
+                after_date=args.after_date,
+                include_domains=include_domains,
+                highlights=config.search.exa_highlights,
+                proxy=config.network.proxy or None,
+            )
+        return parallel_provider.search(
             api_key=require_env("PARALLEL_API_KEY"),
             objective=args.query,
             timeout_seconds=config.network.timeout_seconds,
@@ -622,19 +717,9 @@ def run_search(
             max_chars_total=config.search.max_chars_total,
             proxy=config.network.proxy or None,
         )
-    else:
-        exa_type = _exa_search_type(args.mode, config.search.exa_type)
-        payload = exa_provider.search(
-            api_key=require_env("EXA_API_KEY"),
-            query=args.query,
-            timeout_seconds=config.network.timeout_seconds,
-            search_type=exa_type,
-            max_results=max_results,
-            after_date=args.after_date,
-            include_domains=include_domains,
-            highlights=config.search.exa_highlights,
-            proxy=config.network.proxy or None,
-        )
+
+    provider, payload, attempted = _run_with_fallback(providers, invoke)
+    exa_type: str | None = _exa_search_type(args.mode, config.search.exa_type) if provider == "exa" else None
 
     return CommandResult(
         ok=True,
@@ -650,6 +735,8 @@ def run_search(
             "max_results": max_results,
             "domains": include_domains,
             "after_date": args.after_date,
+            "configured_providers": providers,
+            "attempted_providers": attempted,
         },
     )
 
@@ -660,12 +747,33 @@ def run_extract(
     verbose: bool,
     config_path: Path | None,
 ) -> CommandResult:
-    provider: str = _web_provider(config.extract.provider, args.provider)
+    providers: list[str] = _provider_chain(
+        config.extract.provider, config.extract.fallback_providers, args.provider
+    )
     urls: list[str] = [str(item) for item in args.url]
     full_content: bool = bool(args.full_content or config.extract.full_content)
 
-    if provider == "parallel":
-        payload: dict[str, Any] = parallel_provider.extract(
+    def invoke(provider: str) -> dict[str, Any]:
+        if provider == "keenable":
+            return keenable_provider.extract(
+                api_key=require_env("KEENABLE_API_KEY"),
+                urls=urls,
+                objective=args.objective,
+                timeout_seconds=config.network.timeout_seconds,
+                full_content=full_content,
+                max_chars_per_result=config.extract.max_chars_per_result,
+                proxy=config.network.proxy or None,
+            )
+        if provider == "exa":
+            return exa_provider.extract(
+                api_key=require_env("EXA_API_KEY"),
+                urls=urls,
+                timeout_seconds=config.network.timeout_seconds,
+                full_content=full_content,
+                max_chars_per_result=config.extract.max_chars_per_result,
+                proxy=config.network.proxy or None,
+            )
+        return parallel_provider.extract(
             api_key=require_env("PARALLEL_API_KEY"),
             urls=urls,
             objective=args.objective,
@@ -674,15 +782,8 @@ def run_extract(
             max_chars_per_result=config.extract.max_chars_per_result,
             proxy=config.network.proxy or None,
         )
-    else:
-        payload = exa_provider.extract(
-            api_key=require_env("EXA_API_KEY"),
-            urls=urls,
-            timeout_seconds=config.network.timeout_seconds,
-            full_content=full_content,
-            max_chars_per_result=config.extract.max_chars_per_result,
-            proxy=config.network.proxy or None,
-        )
+
+    provider, payload, attempted = _run_with_fallback(providers, invoke)
 
     return CommandResult(
         ok=True,
@@ -696,6 +797,8 @@ def run_extract(
             "objective": args.objective,
             "objective_applied": provider == "parallel",
             "full_content": full_content,
+            "configured_providers": providers,
+            "attempted_providers": attempted,
         },
     )
 
@@ -991,44 +1094,49 @@ def _run_tg_stt(args: Any, config: AppConfig, tg_config: Any) -> CommandResult:
     import shutil
 
     download_result: CommandResult = tg_commands.run(
-        tg_commands.media_download(tg_config, args.peer, args.message_id, None, False)
+        tg_commands.media_download(tg_config, args.peer, [args.message_id], None, False)
     )
     if not download_result.ok:
         return download_result
     dl_data: dict[str, Any] = download_result.data or {}
-    dl_path: str = dl_data.get("path", "")
+    items: list[dict[str, Any]] = dl_data.get("items", [])
+    dl_path: str = items[0].get("path", "") if items else ""
     if not dl_path:
+        item_error: str = str(items[0].get("error", "")) if items else ""
         return CommandResult(
             ok=False,
             command="tg.stt",
-            provider="groq",
+            provider=stt_provider_name(config.stt.url),
             data=None,
-            error={"type": "no_media", "message": "Message has no downloadable media"},
+            error={
+                "type": item_error or "no_media",
+                "message": item_error or "Message has no downloadable media",
+            },
             meta={},
         )
     # Rename to .ogg for whisper compatibility
     ogg_path: str = dl_path if dl_path.endswith(".ogg") else f"{dl_path.rsplit('.', 1)[0]}.ogg"
     if ogg_path != dl_path:
         shutil.copy2(dl_path, ogg_path)
-    api_key: str = config.stt.api_key or require_env("GROQ_API_KEY")
-    result_data: dict[str, Any] = groq_provider.transcribe(
+    api_key: str = require_stt_api_key(config.stt.api_key)
+    result_data: dict[str, Any] = stt_provider.transcribe_file(
         source=ogg_path,
         api_key=api_key,
         model=config.stt.model,
-        language=args.language or "",
+        language=args.language or config.stt.language,
         url=config.stt.url,
-        timeout_seconds=60,
-        timestamps="none",
-        temperature=0.0,
-        prompt="",
-        proxy=None,
+        timeout_seconds=max(float(config.network.timeout_seconds), 180.0),
+        timestamps=config.stt.timestamps or "none",
+        temperature=config.stt.temperature,
+        prompt=config.stt.prompt,
+        proxy=config.network.proxy or None,
     )
     text: str = result_data.get("text", "")
     return CommandResult(
         ok=True,
         command="tg.stt",
-        provider="groq",
-        data={"text": text, "source_path": dl_path, "message_id": args.message_id},
+        provider=stt_provider_name(config.stt.url),
+        data={"text": text, "source_path": dl_path, "message_id": args.message_id, "vad": result_data.get("vad"), "usage": result_data.get("usage")},
         error=None,
         meta={"peer": args.peer, "model": config.stt.model},
     )
@@ -1604,5 +1712,8 @@ def main() -> None:
             message=str(err),
             meta={"command": fallback_command},
         )
+        diagnostics = getattr(err, "shardx_diagnostics", None)
+        if isinstance(diagnostics, dict) and result.error is not None:
+            result.error.update(diagnostics)
         emit_result(result)
         raise SystemExit(err.exit_code) from err

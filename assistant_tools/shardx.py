@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 from typing import cast
 from urllib.parse import quote
+from urllib.parse import urlencode
 
 import httpx
 
@@ -89,6 +90,45 @@ class ShardxClient:
         output.write_bytes(response.content)
         return output, response.headers.get("content-type", "application/octet-stream")
 
+    def upload_file(self, path: str, file_path: Path) -> dict[str, Any]:
+        resolved = file_path.expanduser().resolve()
+        if not resolved.is_file():
+            raise AssistantToolsError(
+                f"file not found: {resolved}",
+                error_type="invalid_request",
+                exit_code=2,
+            )
+        try:
+            with resolved.open("rb") as handle:
+                response = self.client.post(
+                    f"{self.base_url}{path}",
+                    files={"file": (resolved.name, handle)},
+                )
+        except httpx.HTTPError as err:
+            raise AssistantToolsError(
+                f"ShardX unavailable at {self.base_url}: {err}",
+                error_type="shardx_unavailable",
+                exit_code=1,
+            ) from err
+        if response.is_success:
+            try:
+                payload: Any = response.json()
+            except ValueError as err:
+                raise AssistantToolsError(
+                    "ShardX returned invalid JSON",
+                    error_type="invalid_response",
+                    exit_code=1,
+                ) from err
+            if not isinstance(payload, dict):
+                raise AssistantToolsError(
+                    "ShardX returned a non-object JSON response",
+                    error_type="invalid_response",
+                    exit_code=1,
+                )
+            raw_payload = cast(dict[object, Any], payload)
+            return {str(key): value for key, value in raw_payload.items()}
+        self._raise_http_error(response)
+
     def _request(
         self,
         method: str,
@@ -106,8 +146,12 @@ class ShardxClient:
             ) from err
         if response.is_success:
             return response
+        self._raise_http_error(response)
+
+    def _raise_http_error(self, response: httpx.Response) -> None:
         message = response.text.strip() or response.reason_phrase
         error_type = "shardx_http_error"
+        diagnostics: dict[str, Any] = {}
         try:
             payload: Any = response.json()
             if isinstance(payload, dict):
@@ -121,6 +165,11 @@ class ShardxClient:
                     typed_error: dict[str, Any] = {
                         str(key): value for key, value in raw_error_payload.items()
                     }
+                    diagnostics = {
+                        key: typed_error[key]
+                        for key in ("code", "retryable", "recovery", "outcome")
+                        if key in typed_error
+                    }
                     message = str(typed_error.get("message", message))
                     error_type = str(
                         typed_error.get("code", typed_error.get("type", error_type))
@@ -128,13 +177,20 @@ class ShardxClient:
                 elif typed_payload.get("message") or typed_payload.get("error"):
                     message = str(typed_payload.get("message", typed_payload.get("error")))
                     error_type = str(typed_payload.get("code", error_type))
+                    diagnostics = {
+                        key: typed_payload[key]
+                        for key in ("code", "retryable", "recovery", "outcome")
+                        if key in typed_payload
+                    }
         except ValueError:
             pass
-        raise AssistantToolsError(
+        error = AssistantToolsError(
             f"ShardX HTTP {response.status_code}: {message}",
             error_type=error_type,
             exit_code=1,
         )
+        error.shardx_diagnostics = diagnostics
+        raise error
 
 
 def _part(value: str) -> str:
@@ -210,16 +266,16 @@ def run(args: Any) -> CommandResult:
                 opened = client.request_json(
                     "POST",
                     f"/identities/{_part(session)}/open",
-                    json={"url": args.url, "live": bool(args.live)},
+                    json={"url": args.url, "live": bool(args.live), "view": args.view},
                 )
                 session_info: dict[str, Any] | None = None
             else:
                 session = str(args.session or f"kit-{os.getpid()}")
                 session_info = _ensure_session(client, args, session)
                 opened = client.request_json(
-                    "POST", f"/sessions/{_part(session)}/open", json={"url": args.url}
+                    "POST", f"/sessions/{_part(session)}/open", json={"url": args.url, "view": args.view}
                 )
-            observation = client.request_json("GET", f"/sessions/{_part(session)}/observe")
+            observation = opened if any(key in opened for key in ("model_text", "observation", "content")) else client.request_json("GET", f"/sessions/{_part(session)}/observe")
             return _result(
                 command,
                 {
@@ -261,22 +317,25 @@ def run(args: Any) -> CommandResult:
             return _result(f"identity.{sub}", data, client.base_url)
         session = _part(str(args.session))
         if command == "observe":
-            data = client.request_json("GET", f"/sessions/{session}/observe")
+            query = {"query": args.query, "snapshot": args.snapshot, "cursor": args.cursor}
+            query_items = [(key, value) for key, value in query.items() if value is not None]
+            query_items.extend(("roles", role) for role in args.roles if role)
+            suffix = f"?{urlencode(query_items)}" if query_items else ""
+            data = client.request_json("GET", f"/sessions/{session}/observe{suffix}")
         elif command == "read":
-            text = client.request_text(
-                "POST",
-                f"/sessions/{session}/read",
-                json={
-                    "full_page": bool(args.full_page),
-                    "max_chars": args.max_chars,
-                    "max_blocks": args.max_blocks,
-                    "region": args.region,
-                    "include_interactive": False,
-                },
-            )
-            data = {"session": args.session, "text": text}
+            payload = {
+                "full_page": bool(args.full_page),
+                "max_chars": args.max_chars,
+                "max_blocks": args.max_blocks,
+                "region": args.region,
+                "include_interactive": False,
+            }
+            if args.cursor is not None:
+                payload["cursor"] = args.cursor
+            projection = client.request_json("POST", f"/sessions/{session}/read", json=payload)
+            data = {"session": args.session, **projection}
         elif command == "read-ref":
-            text = client.request_text(
+            projection = client.request_json(
                 "POST",
                 f"/sessions/{session}/read-ref",
                 json={
@@ -286,12 +345,7 @@ def run(args: Any) -> CommandResult:
                     "max_blocks": args.max_blocks,
                 },
             )
-            data = {
-                "session": args.session,
-                "snapshot": args.snapshot,
-                "ref": args.ref,
-                "text": text,
-            }
+            data = {"session": args.session, "snapshot": args.snapshot, "ref": args.ref, **projection}
         elif command == "act":
             data = client.request_json(
                 "POST",
@@ -319,7 +373,7 @@ def run(args: Any) -> CommandResult:
                     error_type="missing_secret",
                     exit_code=2,
                 )
-            client.request_json(
+            fill_result = client.request_json(
                 "POST",
                 f"/sessions/{session}/act",
                 json={
@@ -330,7 +384,7 @@ def run(args: Any) -> CommandResult:
                     "clear": True,
                 },
             )
-            data = {"session": args.session, "ref": args.ref, "filled": True}
+            data = {"session": args.session, "ref": args.ref, "filled": True, **fill_result}
         elif command == "page":
             body: dict[str, Any] = {}
             if args.action == "scroll":
@@ -348,8 +402,12 @@ def run(args: Any) -> CommandResult:
             action_result = client.request_json(
                 "POST", f"/sessions/{session}/{args.action}", json=body
             )
-            observation = client.request_json("GET", f"/sessions/{session}/observe")
-            data = {"action": args.action, "result": action_result, "observation": observation}
+            observation = action_result.get("observation")
+            if observation is None and "observation_error" not in action_result:
+                observation = client.request_json("GET", f"/sessions/{session}/observe")
+            data = {"session": args.session, "action": args.action, "result": action_result}
+            if observation is not None:
+                data["observation"] = observation
         elif command == "tabs":
             if args.select:
                 selected = client.request_json(
@@ -357,8 +415,12 @@ def run(args: Any) -> CommandResult:
                     f"/sessions/{session}/tabs/select",
                     json={"ref": args.select},
                 )
-                observation = client.request_json("GET", f"/sessions/{session}/observe")
-                data = {"selected": selected, "observation": observation}
+                observation = selected.get("observation")
+                if observation is None and "observation_error" not in selected:
+                    observation = client.request_json("GET", f"/sessions/{session}/observe")
+                data = {"session": args.session, "selected": selected}
+                if observation is not None:
+                    data["observation"] = observation
             else:
                 data = client.request_json("GET", f"/sessions/{session}/tabs")
         elif command == "close-tab":
@@ -382,6 +444,15 @@ def run(args: Any) -> CommandResult:
                 "annotated": bool(args.annotate),
                 "snapshot": args.annotate,
             }
+        elif command == "file":
+            uploaded = client.upload_file(f"/sessions/{session}/file", Path(args.path))
+            data = {"session": args.session, **uploaded}
+        elif command == "walk":
+            data = client.request_json(
+                "POST",
+                f"/sessions/{session}/walk",
+                json={"brief": args.brief, "max_steps": args.max_steps, **({"target": {"materials": args.target_materials}} if args.target_materials else {}), **({"inputs": args.inputs} if args.inputs is not None else {})},
+            )
         else:
             raise AssistantToolsError(
                 f"Unknown ShardX command: {command}",

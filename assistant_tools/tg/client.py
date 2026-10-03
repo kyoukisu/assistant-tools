@@ -68,13 +68,15 @@ def make_client(config: ResolvedTgConfig, *, receive_updates: bool = False) -> T
 async def telegram_client(
     config: ResolvedTgConfig, *, receive_updates: bool = False
 ) -> AsyncIterator[TelegramClient]:
-    if _daemon_client is not None:
+    daemon_client: TelegramClient | None = _daemon_client
+    if daemon_client is not None:
         try:
-            if _daemon_client.is_connected():
-                yield _daemon_client
-                return
+            is_daemon_connected: bool = daemon_client.is_connected()
         except Exception:
-            pass
+            is_daemon_connected = False
+        if is_daemon_connected:
+            yield daemon_client
+            return
     client: TelegramClient = make_client(config, receive_updates=receive_updates)
     await client.connect()
     try:

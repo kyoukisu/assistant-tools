@@ -43,9 +43,9 @@ def load_config(config_path: Path | None = None) -> AppConfig:
             '# kit configuration\n'
             '# Docs: https://github.com/kyoukisu/assistant-tools\n\n'
             '[stt]\n'
-            '# url = "https://api.groq.com/openai/v1/audio/transcriptions"\n'
+            '# url = "https://openrouter.ai/api/v1/audio/transcriptions"\n'
             '# api_key = ""\n'
-            '# model = "whisper-large-v3"\n'
+            '# model = "qwen/qwen3-asr-flash-2026-02-10"\n'
         )
 
     network_config: NetworkConfig = NetworkConfig(**_section(raw, "network"))

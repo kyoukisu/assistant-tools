@@ -14,9 +14,9 @@ class NetworkConfig:
 
 @dataclass(slots=True)
 class SttConfig:
-    url: str = "https://api.groq.com/openai/v1/audio/transcriptions"
+    url: str = "https://openrouter.ai/api/v1/audio/transcriptions"
     api_key: str = ""
-    model: str = "whisper-large-v3"
+    model: str = "qwen/qwen3-asr-flash-2026-02-10"
     language: str = ""
     timestamps: str = "none"
     temperature: float = 0.0
@@ -25,7 +25,8 @@ class SttConfig:
 
 @dataclass(slots=True)
 class SearchConfig:
-    provider: str = "parallel"
+    provider: str = "keenable"
+    fallback_providers: list[str] = field(default_factory=lambda: ["exa", "parallel"])
     mode: str = "agentic"
     exa_type: str = "auto"
     exa_highlights: bool = True
@@ -36,7 +37,8 @@ class SearchConfig:
 
 @dataclass(slots=True)
 class ExtractConfig:
-    provider: str = "parallel"
+    provider: str = "keenable"
+    fallback_providers: list[str] = field(default_factory=lambda: ["exa", "parallel"])
     full_content: bool = False
     max_chars_per_result: int = 5000
 
@@ -53,9 +55,9 @@ class VttConfig:
 
 @dataclass(slots=True)
 class TtsConfig:
-    backend: str = "supertonic"
-    model: str = "supertonic-3"
-    voice: str = "F1"
+    backend: str = "openrouter"
+    model: str = "google/gemini-3.8-flash-lite-tts"
+    voice: str = "Kore"
     language: str = ""
     speed: float = 1.05
     clean_text: bool = False

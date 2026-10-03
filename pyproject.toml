@@ -5,22 +5,15 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "assistant-tools"
 version = "0.1.0"
-description = "JSON-only CLI toolbox for search, extract, speech-to-text, and video-to-text"
+description = "JSON-only CLI toolbox for search, extract, speech, video, Telegram, and ShardX"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "cryptg>=0.5.2",
   "httpx>=0.28.1",
   "python-socks[asyncio]>=2.8.1",
-  "soundfile>=0.13.1",
   "socksio>=1.0.0",
-  "supertonic>=1.2.3",
   "telethon>=1.43.0",
-]
-
-[project.optional-dependencies]
-kitten-tts = [
-  "kittentts",
 ]
 
 [project.scripts]
@@ -29,8 +22,6 @@ kit = "assistant_tools.cli:main"
 
 [tool.uv]
 package = true
-[tool.uv.sources]
-kittentts = { git = "https://github.com/KittenML/KittenTTS", rev = "395171a68d5c73a50027436988fb856c30c748b8" }
 
 [dependency-groups]
 dev = [

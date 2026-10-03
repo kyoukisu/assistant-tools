@@ -43,7 +43,7 @@ def test_open_creates_session_and_returns_observation(monkeypatch: pytest.Monkey
         if request.method == "POST" and request.url.path == "/sessions":
             return httpx.Response(200, json={"session_id": "s1"})
         if request.url.path == "/sessions/s1/open":
-            return httpx.Response(200, json={"opened": True})
+            return httpx.Response(200, json={"ok": True, "view": "status"})
         if request.url.path == "/sessions/s1/observe":
             return httpx.Response(200, json={"snapshot": "snap-1", "controls": []})
         raise AssertionError(f"unexpected request: {request.method} {request.url}")
@@ -51,7 +51,9 @@ def test_open_creates_session_and_returns_observation(monkeypatch: pytest.Monkey
     client = mock_client(handler)
     monkeypatch.setattr(ShardxClient, "from_env", classmethod(lambda cls: client))
     result = dispatch(
-        parse("open", "https://example.com", "--session", "s1"), load_config(None), None
+        parse("open", "https://example.com", "--session", "s1", "--view", "status"),
+        load_config(None),
+        None,
     )
 
     assert result.ok is True
@@ -120,7 +122,7 @@ def test_secret_fill_reads_secret_from_environment(monkeypatch: pytest.MonkeyPat
     )
 
     assert result.ok is True
-    assert result.data == {"session": "s1", "ref": "e_password", "filled": True}
+    assert result.data == {"session": "s1", "ref": "e_password", "filled": True, "ok": True}
     assert requests == [
         (
             "POST",
@@ -136,16 +138,16 @@ def test_secret_fill_reads_secret_from_environment(monkeypatch: pytest.MonkeyPat
     ]
 
 
-def test_read_preserves_text_response(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_read_returns_projection(monkeypatch: pytest.MonkeyPatch) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "POST"
         assert request.url.path == "/sessions/s1/read"
-        return httpx.Response(200, text="Article text")
+        return httpx.Response(200, json={"model_text": "Article text", "next_cursor": None})
 
     client = mock_client(handler)
     monkeypatch.setattr(ShardxClient, "from_env", classmethod(lambda cls: client))
     result = dispatch(parse("read", "--session", "s1"), load_config(None), None)
-    assert result.data == {"session": "s1", "text": "Article text"}
+    assert result.data == {"session": "s1", "model_text": "Article text", "next_cursor": None}
 
 
 def test_screenshot_writes_binary_file(

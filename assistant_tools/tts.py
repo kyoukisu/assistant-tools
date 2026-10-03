@@ -1,26 +1,47 @@
 from __future__ import annotations
 
-from contextlib import redirect_stderr
-from contextlib import redirect_stdout
 from datetime import UTC
 from datetime import datetime
-import importlib
-import io
 from pathlib import Path
 import tempfile
-import re
 import subprocess
 import time
+import wave
 from typing import Any
 
+from assistant_tools.http import build_client
+from assistant_tools.http import raise_for_error_response
 from assistant_tools.utils import AssistantToolsError
+from assistant_tools.utils import require_stt_api_key
 
 
-KITTEN_SAMPLE_RATE: int = 24000
-SUPERTONIC_SAMPLE_RATE: int = 44100
-CYRILLIC_RE: re.Pattern[str] = re.compile(r"[\u0400-\u04FF]")
-DEFAULT_KITTEN_MODEL: str = "KittenML/kitten-tts-micro-0.8"
-DEFAULT_SUPERTONIC_MODEL: str = "supertonic-3"
+DEFAULT_TTS_URL: str = "https://openrouter.ai/api/v1/audio/speech"
+DEFAULT_TTS_MODEL: str = "google/gemini-3.8-flash-lite-tts"
+DEFAULT_TTS_VOICE: str = "Kore"
+LOCAL_VOICES: set[str] = {
+    "f1",
+    "f2",
+    "f3",
+    "f4",
+    "f5",
+    "m1",
+    "m2",
+    "m3",
+    "m4",
+    "m5",
+    "rosie",
+    "kiki",
+    "luna",
+    "bella",
+}
+LOCAL_MODELS: set[str] = {
+    "",
+    "supertonic",
+    "supertonic-3",
+    "supertonic3",
+    "kitten",
+    "kittentts",
+}
 
 
 def _resolve_output_path(output: str | None, output_dir: str) -> Path:
@@ -42,204 +63,108 @@ def _temporary_output_path() -> Path:
         return Path(tmp.name)
 
 
-def _ensure_english_text(text: str) -> None:
-    if CYRILLIC_RE.search(text):
-        raise AssistantToolsError(
-            "KittenTTS supports English text only; use Supertonic for Cyrillic/Russian input",
-            error_type="unsupported_language",
-            exit_code=2,
+def _resolve_model(model: str) -> str:
+    value: str = model.strip()
+    lowered: str = value.lower()
+    if lowered in LOCAL_MODELS or "kitten" in lowered:
+        return DEFAULT_TTS_MODEL
+    return value
+
+
+def _resolve_voice(voice: str) -> str:
+    value: str = voice.strip()
+    if not value or value.lower() in LOCAL_VOICES:
+        return DEFAULT_TTS_VOICE
+    return value
+
+
+def _pcm_layout(content_type: str) -> tuple[int, int]:
+    rate: int = 24000
+    channels: int = 1
+    for part in content_type.split(";"):
+        key, separator, raw = part.strip().partition("=")
+        if not separator or not raw.isdigit():
+            continue
+        if key == "rate":
+            rate = int(raw)
+        elif key == "channels":
+            channels = int(raw)
+    return rate, channels
+
+
+def _looks_like_mp3(audio: bytes, content_type: str) -> bool:
+    lowered: str = content_type.lower()
+    if "mpeg" in lowered or "mp3" in lowered:
+        return True
+    return audio.startswith(b"ID3") or audio[:2] in {b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"}
+
+
+def _write_pcm_wav(audio: bytes, content_type: str, output_path: Path) -> tuple[int, float]:
+    rate, channels = _pcm_layout(content_type)
+    sample_width: int = 2
+    with wave.open(str(output_path), "wb") as wav_file:
+        wav_file.setnchannels(channels)
+        wav_file.setsampwidth(sample_width)
+        wav_file.setframerate(rate)
+        wav_file.writeframes(audio)
+    frame_width: int = sample_width * channels
+    frames: int = len(audio) // frame_width if frame_width else 0
+    duration: float = frames / rate if rate else 0.0
+    return rate, duration
+
+
+def _write_mp3_wav(audio: bytes, output_path: Path) -> tuple[int, float]:
+    with tempfile.NamedTemporaryFile(
+        prefix="assistant-tools-tts-", suffix=".mp3", delete=False
+    ) as tmp:
+        tmp.write(audio)
+        mp3_path: Path = Path(tmp.name)
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(mp3_path), "-ac", "1", str(output_path)],
+            check=True,
+            capture_output=True,
         )
-
-
-def _auto_language(text: str, language: str | None) -> str | None:
-    if language:
-        return language
-    if CYRILLIC_RE.search(text):
-        return "ru"
-    return "en"
-
-
-def _silence_upstream(call: Any) -> Any:
-    sink = io.StringIO()
-    with redirect_stdout(sink), redirect_stderr(sink):
-        return call()
-
-
-def _load_kittentts_dependencies() -> tuple[Any, Any]:
-    try:
-        kittentts_module: Any = importlib.import_module("kittentts")
-        KittenTTS: Any = getattr(kittentts_module, "KittenTTS")
-    except ImportError as err:
+    except FileNotFoundError as err:
         raise AssistantToolsError(
-            "Missing Python dependency: kittentts. Reinstall assistant-tools with KittenTTS support.",
-            error_type="missing_dependency",
-            exit_code=4,
+            "OpenRouter returned MP3 and ffmpeg is not available to wrap it as WAV",
+            error_type="missing_runtime",
+            exit_code=5,
         ) from err
-
-    try:
-        sf: Any = importlib.import_module("soundfile")
-    except ImportError as err:
+    except subprocess.CalledProcessError as err:
+        detail: str = (err.stderr or b"").decode("utf-8", "replace").strip()
+        suffix: str = f": {detail}" if detail else ""
         raise AssistantToolsError(
-            "Missing Python dependency: soundfile. Reinstall assistant-tools so runtime dependencies are present.",
-            error_type="missing_dependency",
-            exit_code=4,
-        ) from err
-
-    return KittenTTS, sf
-
-
-def _load_kittentts_model(KittenTTS: Any, model: str) -> Any:
-    try:
-        return _silence_upstream(lambda: KittenTTS(model))
-    except Exception as err:
-        raise AssistantToolsError(
-            f"Failed to load KittenTTS model '{model}': {err}",
-            error_type="tts_model_error",
-            exit_code=4,
-        ) from err
-
-
-def _load_supertonic_dependencies() -> Any:
-    try:
-        module: Any = importlib.import_module("supertonic")
-        return getattr(module, "TTS")
-    except ImportError as err:
-        raise AssistantToolsError(
-            "Missing Python dependency: supertonic. Reinstall assistant-tools with Supertonic support.",
-            error_type="missing_dependency",
-            exit_code=4,
-        ) from err
-
-
-def _synthesize_kittentts(
-    *,
-    text: str,
-    model: str,
-    voice: str,
-    speed: float,
-    clean_text: bool,
-    output_path: Path,
-) -> dict[str, Any]:
-    _ensure_english_text(text)
-    KittenTTS, sf = _load_kittentts_dependencies()
-    model_name = DEFAULT_KITTEN_MODEL if model in {"", "kitten", "kittentts"} else model
-    model_instance: Any = _load_kittentts_model(KittenTTS, model_name)
-
-    started = time.perf_counter()
-    try:
-        audio: Any = _silence_upstream(
-            lambda: model_instance.generate(
-                text, voice=voice, speed=speed, clean_text=clean_text
-            )
-        )
-    except Exception as err:
-        raise AssistantToolsError(
-            f"KittenTTS synthesis failed: {err}",
-            error_type="tts_generation_error",
-            exit_code=4,
-        ) from err
-    generation_seconds = time.perf_counter() - started
-
-    try:
-        sf.write(str(output_path), audio, KITTEN_SAMPLE_RATE)
-    except Exception as err:
-        raise AssistantToolsError(
-            f"Failed to write WAV file: {output_path}",
+            f"ffmpeg failed to wrap OpenRouter audio{suffix}",
             error_type="tts_write_error",
             exit_code=5,
         ) from err
-
-    sample_count: int = int(len(audio))
-    duration_seconds: float = sample_count / KITTEN_SAMPLE_RATE if sample_count > 0 else 0.0
-    return {
-        "sample_rate": KITTEN_SAMPLE_RATE,
-        "duration_seconds": round(duration_seconds, 4),
-        "generation_seconds": round(generation_seconds, 4),
-        "rtf": round(generation_seconds / duration_seconds, 4) if duration_seconds > 0 else 0.0,
-        "model": model_name,
-        "voice": voice,
-        "language": "en",
-    }
+    finally:
+        mp3_path.unlink(missing_ok=True)
+    return _wav_stats(output_path)
 
 
-def _synthesize_supertonic(
-    *,
-    text: str,
-    model: str,
-    voice: str,
-    speed: float,
-    language: str | None,
-    output_path: Path,
-) -> dict[str, Any]:
-    TTS: Any = _load_supertonic_dependencies()
-    model_name = DEFAULT_SUPERTONIC_MODEL if model in {"", "supertonic"} else model
-    lang = _auto_language(text, language)
+def _wav_stats(path: Path) -> tuple[int, float]:
+    with wave.open(str(path), "rb") as wav_file:
+        rate: int = wav_file.getframerate() or 0
+        frames: int = wav_file.getnframes()
+    duration: float = frames / rate if rate else 0.0
+    return rate, duration
 
-    try:
-        tts = _silence_upstream(lambda: TTS(model=model_name, auto_download=True))
-        style = tts.get_voice_style(voice)
-    except Exception as err:
+
+def _write_audio(audio: bytes, content_type: str, output_path: Path) -> tuple[int, float]:
+    if not audio:
         raise AssistantToolsError(
-            f"Failed to load Supertonic model '{model_name}' voice '{voice}': {err}",
-            error_type="tts_model_error",
-            exit_code=4,
-        ) from err
-
-    started = time.perf_counter()
-    try:
-        wav, duration = _silence_upstream(
-            lambda: tts.synthesize(
-                text,
-                voice_style=style,
-                lang=lang,
-                speed=speed,
-                total_steps=8,
-                verbose=False,
-            )
-        )
-    except Exception as err:
-        raise AssistantToolsError(
-            f"Supertonic synthesis failed: {err}",
+            "OpenRouter TTS returned an empty audio stream",
             error_type="tts_generation_error",
             exit_code=4,
-        ) from err
-    generation_seconds = time.perf_counter() - started
-
-    try:
-        tts.save_audio(wav, str(output_path))
-    except Exception as err:
-        raise AssistantToolsError(
-            f"Failed to write WAV file: {output_path}",
-            error_type="tts_write_error",
-            exit_code=5,
-        ) from err
-
-    try:
-        duration_seconds = float(duration[-1]) if hasattr(duration, "__len__") else float(duration)
-    except Exception:
-        duration_seconds = 0.0
-
-    return {
-        "sample_rate": SUPERTONIC_SAMPLE_RATE,
-        "duration_seconds": round(duration_seconds, 4),
-        "generation_seconds": round(generation_seconds, 4),
-        "rtf": round(generation_seconds / duration_seconds, 4) if duration_seconds > 0 else 0.0,
-        "model": model_name,
-        "voice": voice,
-        "language": lang,
-    }
-
-
-def _normalize_backend(backend: str | None, model: str) -> str:
-    value = (backend or "").strip().lower()
-    if value in {"kitten", "kittentts"}:
-        return "kittentts"
-    if value in {"supertonic", "supertonic3", "supertonic-3"}:
-        return "supertonic"
-    model_lower = model.lower()
-    if model_lower in {"kitten", "kittentts"} or "kitten" in model_lower:
-        return "kittentts"
-    return "supertonic"
+        )
+    if audio.startswith(b"RIFF"):
+        output_path.write_bytes(audio)
+        return _wav_stats(output_path)
+    if _looks_like_mp3(audio, content_type):
+        return _write_mp3_wav(audio, output_path)
+    return _write_pcm_wav(audio, content_type, output_path)
 
 
 def synthesize(
@@ -257,30 +182,57 @@ def synthesize(
     backend: str | None = None,
     language: str | None = None,
 ) -> dict[str, Any]:
+    del clean_text, backend
+    selected_model: str = _resolve_model(model)
+    selected_voice: str = _resolve_voice(voice)
     should_save: bool = save or output is not None
     output_path: Path = (
         _resolve_output_path(output, output_dir) if should_save else _temporary_output_path()
     )
+    api_key: str = require_stt_api_key("")
+    body: dict[str, Any] = {
+        "model": selected_model,
+        "input": text,
+        "voice": selected_voice,
+        "response_format": "pcm",
+    }
 
-    selected_backend = _normalize_backend(backend, model)
-    if selected_backend == "kittentts":
-        payload = _synthesize_kittentts(
-            text=text,
-            model=model,
-            voice=voice,
-            speed=speed,
-            clean_text=clean_text,
-            output_path=output_path,
-        )
-    else:
-        payload = _synthesize_supertonic(
-            text=text,
-            model=model,
-            voice=voice,
-            speed=speed,
-            language=language,
-            output_path=output_path,
-        )
+    started: float = time.perf_counter()
+    try:
+        with build_client(120.0, None) as client:
+            response = client.post(
+                DEFAULT_TTS_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+            )
+            raise_for_error_response(response)
+            audio: bytes = response.content
+            content_type: str = response.headers.get("content-type", "")
+    except AssistantToolsError:
+        raise
+    except Exception as err:
+        raise AssistantToolsError(
+            f"OpenRouter TTS failed: {err}",
+            error_type="tts_generation_error",
+            exit_code=4,
+        ) from err
+    generation_seconds: float = time.perf_counter() - started
+
+    try:
+        sample_rate, duration_seconds = _write_audio(audio, content_type, output_path)
+    except AssistantToolsError:
+        output_path.unlink(missing_ok=True)
+        raise
+    except Exception as err:
+        output_path.unlink(missing_ok=True)
+        raise AssistantToolsError(
+            f"Failed to write WAV file: {output_path}",
+            error_type="tts_write_error",
+            exit_code=5,
+        ) from err
 
     played: bool = False
     if play:
@@ -312,10 +264,16 @@ def synthesize(
 
     return {
         "path": str(output_path) if persisted else None,
-        "backend": selected_backend,
-        **payload,
+        "backend": "openrouter",
+        "sample_rate": sample_rate,
+        "duration_seconds": round(duration_seconds, 4),
+        "generation_seconds": round(generation_seconds, 4),
+        "rtf": round(generation_seconds / duration_seconds, 4) if duration_seconds > 0 else 0.0,
+        "model": selected_model,
+        "voice": selected_voice,
+        "language": language or None,
         "speed": speed,
-        "clean_text": clean_text if selected_backend == "kittentts" else None,
+        "clean_text": None,
         "saved": persisted,
         "played": played,
         "volume": volume if played else None,

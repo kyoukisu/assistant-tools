@@ -23,6 +23,10 @@ GROQ_AUDIO_MIME_TYPES: dict[str, str] = {
 }
 
 
+def model_supports_verbose_json(model: str) -> bool:
+    return "qwen3-asr" not in model.lower()
+
+
 def upload_file_metadata(path: Path) -> tuple[str, str]:
     suffix: str = path.suffix.lower()
     upload_suffix: str = GROQ_AUDIO_EXTENSION_ALIASES.get(suffix, suffix)
@@ -48,19 +52,24 @@ def transcribe(
         "model": model,
         "temperature": str(temperature),
     }
-    response_format: str = "verbose_json" if timestamps != "none" else "json"
+    want_timestamps: bool = timestamps != "none"
+    use_verbose_json: bool = want_timestamps and model_supports_verbose_json(model)
+    response_format: str = "verbose_json" if use_verbose_json else "json"
     data["response_format"] = response_format
     if language:
         data["language"] = language
     if prompt:
         data["prompt"] = prompt
-    if timestamps == "segment":
+    if use_verbose_json and timestamps == "segment":
         data["timestamp_granularities[]"] = "segment"
-    elif timestamps == "word":
+    elif use_verbose_json and timestamps == "word":
         data["timestamp_granularities[]"] = "word"
 
     endpoint: str = url or f"{GROQ_BASE_URL}/audio/transcriptions"
     headers: dict[str, str] = {"Authorization": f"Bearer {api_key}"}
+    if "openrouter.ai" in endpoint.lower():
+        headers["HTTP-Referer"] = "https://github.com/kyoukisu/assistant-tools"
+        headers["X-Title"] = "kit stt"
     with build_client(timeout_seconds, proxy) as client:
         if source.startswith("http://") or source.startswith("https://"):
             data["url"] = source
@@ -83,4 +92,24 @@ def transcribe(
                 )
         raise_for_error_response(response)
         parsed: dict[str, Any] = response.json()
+        if want_timestamps and not isinstance(parsed.get("segments"), list):
+            seconds: float = 0.0
+            usage: Any = parsed.get("usage")
+            if isinstance(usage, dict) and usage.get("seconds") is not None:
+                try:
+                    seconds = float(usage["seconds"])
+                except (TypeError, ValueError):
+                    seconds = 0.0
+            parsed["segments"] = [
+                {
+                    "id": 0,
+                    "start": 0,
+                    "end": seconds,
+                    "text": str(parsed.get("text") or ""),
+                }
+            ]
+            parsed["timestamps_note"] = (
+                f"{model} does not support verbose_json; returned one clip-level segment. "
+                "Use microsoft/mai-transcribe-2 when real segment/word timestamps are required."
+            )
         return parsed

@@ -46,4 +46,5 @@ def raise_for_error_response(response: httpx.Response) -> None:
         f"HTTP {response.status_code}: {message}",
         error_type=error_type,
         exit_code=1,
+        status_code=response.status_code,
     )
