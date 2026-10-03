@@ -313,7 +313,7 @@ Notes:
 - `send-file` sends a local file as a document.
 - `send-photo` sends a local image as a Telegram photo.
 - `send-voice` sends a local audio file as a Telegram voice note.
-- `speak` synthesizes English speech locally and sends it as a Telegram voice note in one step.
+- `speak` synthesizes speech through OpenRouter and sends it as a Telegram voice note in one step.
 - `wait-next` waits for the next incoming message in the target chat and requires `--timeout-seconds`.
 - If `send-voice` gets a non-ogg/non-opus file such as WAV, it auto-converts it to OGG/Opus with `ffmpeg` before upload.
 
