@@ -1120,7 +1120,9 @@ def _ensure_daemon(tg_config: Any) -> None:
     """Start the daemon if not already running."""
     import subprocess as _sp
     import time as _t
-    from assistant_tools.tg.ipc import SOCKET_PATH as _SOCK
+    from assistant_tools.tg.ipc import socket_path as _socket_path
+
+    _SOCK = _socket_path(tg_config.profile)
 
     if _SOCK.exists():
         return
@@ -1143,11 +1145,10 @@ def _ensure_daemon(tg_config: Any) -> None:
         _t.sleep(0.1)
 
 
-async def _daemon_request(request: dict[str, Any]) -> dict[str, Any]:
+async def _daemon_request(request: dict[str, Any], _SOCK: Path) -> dict[str, Any]:
     """Send a request to the running daemon and return the response."""
     import asyncio as _aio
     from assistant_tools.tg.ipc import IPC_STREAM_LIMIT as _IPC_STREAM_LIMIT
-    from assistant_tools.tg.ipc import SOCKET_PATH as _SOCK
 
     if not _SOCK.exists():
         return {"ok": False, "error": "daemon not running (no socket)"}
@@ -1170,9 +1171,11 @@ def _daemon_response_is_locked(response: dict[str, Any]) -> bool:
 
 def _request_daemon_with_recovery(request: dict[str, Any], tg_config: Any) -> dict[str, Any]:
     import time as _t
-    from assistant_tools.tg.ipc import SOCKET_PATH as _SOCK
+    from assistant_tools.tg.ipc import socket_path as _socket_path
 
-    resp = _asyncio.run(_daemon_request(request))
+    _SOCK = _socket_path(tg_config.profile)
+
+    resp = _asyncio.run(_daemon_request(request, _SOCK))
     error = str(resp.get("error", ""))
     if not resp.get("ok") and (
         resp.get("error") == "daemon not running (no socket)" or "Connection refused" in error
@@ -1181,18 +1184,18 @@ def _request_daemon_with_recovery(request: dict[str, Any], tg_config: Any) -> di
         _ensure_daemon(tg_config)
         if not _SOCK.exists():
             return resp
-        resp = _asyncio.run(_daemon_request(request))
+        resp = _asyncio.run(_daemon_request(request, _SOCK))
 
     if not _daemon_response_is_locked(resp):
         return resp
 
     for delay in (0.2, 0.5, 1.0):
         _t.sleep(delay)
-        resp = _asyncio.run(_daemon_request(request))
+        resp = _asyncio.run(_daemon_request(request, _SOCK))
         if not _daemon_response_is_locked(resp):
             return resp
 
-    _asyncio.run(_daemon_request({"cmd": "shutdown"}))
+    _asyncio.run(_daemon_request({"cmd": "shutdown"}, _SOCK))
     deadline = _t.time() + 3.0
     while _SOCK.exists() and _t.time() < deadline:
         _t.sleep(0.1)
@@ -1202,7 +1205,7 @@ def _request_daemon_with_recovery(request: dict[str, Any], tg_config: Any) -> di
     _ensure_daemon(tg_config)
     if not _SOCK.exists():
         return resp
-    return _asyncio.run(_daemon_request(request))
+    return _asyncio.run(_daemon_request(request, _SOCK))
 
 
 def _send_voice_via_daemon(
@@ -1235,7 +1238,9 @@ def _send_voice_via_daemon(
 
 def _daemon_middleware(args: Any, tg_config: Any) -> CommandResult | None:
     """Try to proxy command through daemon. Returns None to fall through to direct."""
-    from assistant_tools.tg.ipc import SOCKET_PATH as _SOCK
+    from assistant_tools.tg.ipc import socket_path as _socket_path
+
+    _SOCK = _socket_path(tg_config.profile)
 
     # Auto-start daemon on first use
     if not _SOCK.exists():

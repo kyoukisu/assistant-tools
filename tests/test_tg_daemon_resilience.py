@@ -29,14 +29,15 @@ def test_daemon_lock_allows_only_one_owner(tmp_path: Path) -> None:
     third.close()
 
 
-def test_daemon_request_retries_sqlite_lock(monkeypatch: Any) -> None:
+def test_daemon_request_retries_sqlite_lock(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     responses = [
         {"ok": False, "error": "database is locked"},
         {"ok": True, "data": {"message": "sent"}},
     ]
     sleeps: list[float] = []
 
-    async def fake_request(request: dict[str, Any]) -> dict[str, Any]:
+    async def fake_request(request: dict[str, Any], sock: Path) -> dict[str, Any]:
         return responses.pop(0)
 
     monkeypatch.setattr(cli, "_daemon_request", fake_request)
@@ -94,7 +95,6 @@ def test_daemon_request_accepts_large_response(
 ) -> None:
     async def run() -> None:
         socket_path = tmp_path / "large-response.sock"
-        monkeypatch.setattr(ipc, "SOCKET_PATH", socket_path)
 
         async def respond(
             reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -108,7 +108,7 @@ def test_daemon_request_accepts_large_response(
 
         server = await asyncio.start_unix_server(respond, path=str(socket_path))
         async with server:
-            result = await cli._daemon_request({"cmd": "ping"})  # pyright: ignore[reportPrivateUsage]
+            result = await cli._daemon_request({"cmd": "ping"}, socket_path)  # pyright: ignore[reportPrivateUsage]
         assert result["ok"]
         assert len(result["data"]["value"]) == 100_000
 
@@ -149,3 +149,21 @@ def test_shutdown_request_sets_event() -> None:
         assert b"shutting down" in writer.data
 
     asyncio.run(run())
+
+
+def test_socket_paths_are_per_profile_and_private(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    main_sock = ipc.socket_path("main")
+    assert main_sock != ipc.socket_path("work")
+    assert ipc.lock_path("main") != ipc.lock_path("work")
+    assert main_sock.parent == tmp_path / "kit-tg"
+    assert (main_sock.parent.stat().st_mode & 0o777) == 0o700
+    assert ipc.socket_path("../x").parent == tmp_path / "kit-tg"
+
+
+def test_socket_dir_falls_back_without_xdg(monkeypatch: Any, tmp_path: Path) -> None:
+    monkeypatch.delenv("XDG_RUNTIME_DIR", raising=False)
+    monkeypatch.setattr(ipc.tempfile, "gettempdir", lambda: str(tmp_path))
+    sock = ipc.socket_path("main")
+    assert sock.parent == tmp_path / f"kit-tg-{os.getuid()}"
+    assert (sock.parent.stat().st_mode & 0o777) == 0o700

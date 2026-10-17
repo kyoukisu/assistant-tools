@@ -22,8 +22,8 @@ from assistant_tools.tg.client import _set_daemon_client
 from assistant_tools.tg.client import make_client
 from assistant_tools.tg.config import ResolvedTgConfig
 from assistant_tools.tg.ipc import IPC_STREAM_LIMIT as IPC_STREAM_LIMIT
-from assistant_tools.tg.ipc import LOCK_PATH as LOCK_PATH
-from assistant_tools.tg.ipc import SOCKET_PATH as SOCKET_PATH
+from assistant_tools.tg.ipc import lock_path
+from assistant_tools.tg.ipc import socket_path
 
 IDLE_TIMEOUT: float = 600.0  # 10 minutes
 
@@ -37,7 +37,7 @@ def _touch() -> None:
     _last_activity = _time.time()
 
 
-def _acquire_daemon_lock(path: Path = LOCK_PATH) -> TextIO | None:
+def _acquire_daemon_lock(path: Path) -> TextIO | None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_file = path.open("a+", encoding="utf-8")
     try:
@@ -323,7 +323,8 @@ async def _on_new_message(event: Any) -> None:
 
 async def run_daemon(tg_config: ResolvedTgConfig) -> None:
     """Start the daemon: connect, register handlers, serve Unix socket."""
-    lock_file = _acquire_daemon_lock()
+    sock: Path = socket_path(tg_config.profile)
+    lock_file = _acquire_daemon_lock(lock_path(tg_config.profile))
     if lock_file is None:
         print("kit tg daemon already running", flush=True)
         return
@@ -341,7 +342,7 @@ async def run_daemon(tg_config: ResolvedTgConfig) -> None:
 
         from dataclasses import replace
         daemon_config: ResolvedTgConfig = replace(tg_config, session_file=daemon_session)
-        SOCKET_PATH.unlink(missing_ok=True)
+        sock.unlink(missing_ok=True)
 
         client = make_client(daemon_config, receive_updates=True)
         await client.connect()
@@ -358,10 +359,10 @@ async def run_daemon(tg_config: ResolvedTgConfig) -> None:
 
         server = await asyncio.start_unix_server(
             lambda r, w: handle_client(r, w, tg_config, shutdown_event),
-            path=str(SOCKET_PATH),
+            path=str(sock),
             limit=IPC_STREAM_LIMIT,
         )
-        os.chmod(str(SOCKET_PATH), 0o600)
+        os.chmod(str(sock), 0o600)
         _touch()
 
         async def _idle_watchdog() -> None:
@@ -370,7 +371,7 @@ async def run_daemon(tg_config: ResolvedTgConfig) -> None:
                 if _time.time() - _last_activity > IDLE_TIMEOUT:
                     shutdown_event.set()
 
-        print(f"socket: {SOCKET_PATH}", flush=True)
+        print(f"socket: {sock}", flush=True)
         async with server:
             serve_task = asyncio.create_task(server.serve_forever())
             shutdown_task = asyncio.create_task(shutdown_event.wait())
@@ -388,7 +389,7 @@ async def run_daemon(tg_config: ResolvedTgConfig) -> None:
                 except asyncio.CancelledError:
                     pass
     finally:
-        SOCKET_PATH.unlink(missing_ok=True)
+        sock.unlink(missing_ok=True)
         _set_daemon_client(None)
         if client is not None:
             try:

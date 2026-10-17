@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -115,7 +116,11 @@ def resolve_tg_config(
         profile_config=profile_config,
     )
 
-    session_file.parent.mkdir(parents=True, exist_ok=True)
+    # Session files hold full account auth keys; Telethon/sqlite create them with
+    # the process umask (0644 under 0022), so the directory must be private.
+    # Reported by neko via Telegram, 2026-10.
+    session_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(session_file.parent, 0o700)
     download_dir.mkdir(parents=True, exist_ok=True)
     cache_dir.mkdir(parents=True, exist_ok=True)
 
