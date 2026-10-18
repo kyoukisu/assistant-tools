@@ -221,11 +221,10 @@ def _ensure_session(client: ShardxClient, args: Any, session: str) -> dict[str, 
             }
             if item.get("session_id") == session:
                 if args.proxy and item.get("proxy") != args.proxy:
-                    raise AssistantToolsError(
-                        f"Session {session} already uses proxy {item.get('proxy') or 'unknown'}",
-                        error_type="session_config_conflict",
-                        exit_code=1,
-                    )
+                    # Disposable sessions (identities never reach here) hold nothing worth
+                    # keeping: restart on the requested proxy instead of a manual stop.
+                    client.request_json("POST", f"/sessions/{_part(session)}/stop", json={})
+                    break
                 return item
     body: dict[str, Any] = {
         "session_id": session,
