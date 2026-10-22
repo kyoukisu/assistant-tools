@@ -86,9 +86,9 @@ This path is the recommended declarative install method on NixOS. Runtime state 
 Install the optional `music` extra (`pip install 'assistant-tools[music]'`) and put
 `ffmpeg` on PATH. ShazamIO is loaded only for recognition; other commands do not
 need it. This uses published ShazamIO 0.8.1, not unreleased Git master, and adds
-`audioop-lts` on Python 3.13+ for pydub compatibility. Nix installations must
-package the extra's dependencies separately (including `shazamio-core==1.1.2`)
-and provide ffmpeg; the default flake does not yet include this optional extra.
+`audioop-lts` on Python 3.13+ for pydub compatibility. The default Nix flake
+includes pinned recognition dependencies and headless ffmpeg, including
+`shazamio-core==1.1.2`; no runtime package installation is required.
 
 ```bash
 kit music recognize ./clip.mp4 --start 25 --duration 12 --timeout 60
