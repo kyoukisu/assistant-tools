@@ -44,6 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    music_parser = subparsers.add_parser("music", help="Music recognition via Shazam")
+    music_commands = music_parser.add_subparsers(dest="music_command", required=True)
+    recognize_parser = music_commands.add_parser("recognize", help="Recognize a local audio/video sample")
+    recognize_parser.add_argument("input", help="Local media file")
+    recognize_parser.add_argument("--start", type=float, default=0, help="Start offset in seconds")
+    recognize_parser.add_argument("--duration", type=float, default=15, help="Sample seconds (maximum 30)")
+    recognize_parser.add_argument("--timeout", type=float, default=60, help="Timeout seconds per conversion/recognition stage")
+
     stt_parser = subparsers.add_parser("stt", help="Speech to text via OpenRouter")
     stt_parser.add_argument("input", help="Audio file path or URL")
     stt_parser.add_argument("--language", default=None, help="Language code override")
@@ -1383,6 +1391,14 @@ def dispatch(
     args: argparse.Namespace, config: AppConfig, config_path: Path | None
 ) -> CommandResult:
     verbose: bool = bool(args.verbose)
+    if args.command == "music":
+        from assistant_tools.music import recognize_local
+
+        return CommandResult(
+            ok=True, command="music recognize", provider="shazam",
+            data=recognize_local(args.input, start=args.start, duration=args.duration, timeout=args.timeout),
+            error=None, meta=_meta("music recognize", config, config_path, verbose),
+        )
     if args.command == "stt":
         return run_stt(args, config, verbose, config_path)
     if args.command == "search":

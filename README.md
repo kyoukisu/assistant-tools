@@ -81,6 +81,29 @@ Use it from Home Manager:
 
 This path is the recommended declarative install method on NixOS. Runtime state such as Telegram session files and STT caches still lives outside the Nix store.
 
+## Music recognition
+
+Install the optional `music` extra (`pip install 'assistant-tools[music]'`) and put
+`ffmpeg` on PATH. ShazamIO is loaded only for recognition; other commands do not
+need it. This uses published ShazamIO 0.8.1, not unreleased Git master, and adds
+`audioop-lts` on Python 3.13+ for pydub compatibility. Nix installations must
+package the extra's dependencies separately (including `shazamio-core==1.1.2`)
+and provide ffmpeg; the default flake does not yet include this optional extra.
+
+```bash
+kit music recognize ./clip.mp4 --start 25 --duration 12 --timeout 60
+```
+
+Only local files are accepted. The default sample is 15 seconds, capped at 30;
+start must be nonnegative and all numeric options must be finite. ffmpeg extracts
+a temporary 16 kHz mono PCM WAV, removed on success and failure. `--timeout`
+bounds each of conversion and recognition separately (60 seconds each by default).
+Recognition sends the sample to Shazam's unofficial service; no API key is needed.
+The normal JSON envelope contains `data: {"matched": true, "track": {"title": ...,
+"artist": ..., "key": ..., "url": ...}}`; no match is successful with
+`data: {"matched": false, "track": null}`. Service/conversion/dependency errors
+use the normal error envelope and a nonzero exit status, not a false no-match.
+
 ## Secrets
 
 These are expected via environment variables:

@@ -16,6 +16,12 @@ dependencies = [
   "telethon>=1.43.0",
 ]
 
+[project.optional-dependencies]
+music = [
+  "shazamio==0.8.1",
+  "audioop-lts>=0.2.1; python_version >= '3.13'",
+]
+
 [project.scripts]
 assistant-tools = "assistant_tools.cli:main"
 kit = "assistant_tools.cli:main"
