@@ -482,6 +482,10 @@ def _read_video_metadata(info_path: Path) -> dict[str, Any]:
 
 
 def _ytdlp_command() -> list[str]:
+    # Nix ships the yt-dlp application on PATH; a plain venv has the module.
+    binary: str | None = shutil.which("yt-dlp")
+    if binary:
+        return [binary]
     return [sys.executable, "-m", "yt_dlp"]
 
 
@@ -548,7 +552,8 @@ def download_remote_video(
             )
         if "No module named yt_dlp" in completed.stderr:
             raise AssistantToolsError(
-                "yt-dlp is not installed for this Python environment; reinstall kit with its declared dependencies",
+                "yt-dlp is not available: install kit with its declared dependencies "
+                "or put yt-dlp on PATH",
                 error_type="missing_dependency",
                 exit_code=2,
             )

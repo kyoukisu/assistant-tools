@@ -67,6 +67,7 @@ def test_download_remote_video_uses_bounded_flags_and_reads_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict[str, list[str]] = {}
+    monkeypatch.setattr(video.shutil, "which", lambda name: "/bin/yt-dlp" if name == "yt-dlp" else None)
 
     def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         captured["command"] = command
@@ -85,7 +86,7 @@ def test_download_remote_video_uses_bounded_flags_and_reads_metadata(
     )
 
     command: list[str] = captured["command"]
-    assert command[1:3] == ["-m", "yt_dlp"]
+    assert command[0] == "/bin/yt-dlp"
     assert "--no-playlist" in command
     assert command[command.index("--max-filesize") + 1] == str(video.DOWNLOAD_MAX_BYTES)
     assert f"duration<?{video.DOWNLOAD_MAX_DURATION_SECONDS}" in command
@@ -150,6 +151,7 @@ def test_contact_sheet_tiles_frames_in_timestamp_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict[str, list[str]] = {}
+    monkeypatch.setattr(video.shutil, "which", lambda name: "/bin/yt-dlp" if name == "yt-dlp" else None)
 
     def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         captured["command"] = command
