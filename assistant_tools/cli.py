@@ -108,9 +108,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     video_parser = subparsers.add_parser(
         "video",
-        help="Extract evenly spread frames and optional audio transcript from a local video",
+        help="Extract frames, source metadata, and optional transcript from a local video or URL",
     )
-    video_parser.add_argument("input", help="Local video or GIF path")
+    video_parser.add_argument(
+        "input",
+        help="Local video/GIF path or http(s) URL (YouTube and other yt-dlp sites)",
+    )
     video_parser.add_argument(
         "--output-dir", type=Path, default=None, help="Run output directory root"
     )
@@ -154,6 +157,20 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=None,
         help="Extract frame(s) at explicit second offsets. Repeatable. When provided, overrides auto spreading.",
+    )
+    video_parser.add_argument(
+        "--contact-sheet",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Also compose extracted frames into one grid image per run",
+    )
+    video_parser.add_argument(
+        "--cookies-from-browser",
+        default=None,
+        help="Load site cookies from a browser profile when a URL requires sign-in (e.g. firefox)",
+    )
+    video_parser.add_argument(
+        "--cookies", default=None, help="Netscape cookies file for URL downloads"
     )
     video_parser.add_argument("--language", default=None, help="Language code override")
     video_parser.add_argument("--model", default=None, help="STT model override")
@@ -850,7 +867,6 @@ def run_video(
     args: argparse.Namespace, config: AppConfig, verbose: bool, config_path: Path | None
 ) -> CommandResult:
     source: str = str(args.input)
-    ensure_path_exists(source)
     output_dir: str = (
         str(args.output_dir) if args.output_dir is not None else config.video.output_dir
     )
@@ -870,12 +886,19 @@ def run_video(
         else config.video.align_to_segments
     )
     transcribe: bool = args.transcribe if args.transcribe is not None else config.video.transcribe
+    contact_sheet: bool = (
+        args.contact_sheet
+        if args.contact_sheet is not None
+        else config.video.contact_sheet
+    )
+    cookies_from_browser: str = args.cookies_from_browser or config.video.cookies_from_browser
+    cookies_file: str = args.cookies or config.video.cookies
     timestamps: str = args.timestamps if args.timestamps is not None else config.video.timestamps
     model: str = args.model or config.stt.model
     language: str = args.language if args.language is not None else config.stt.language
     prompt: str = args.prompt if args.prompt is not None else config.stt.prompt
 
-    payload: dict[str, Any] = video_provider.analyze_local_video(
+    payload: dict[str, Any] = video_provider.analyze_video(
         source=source,
         output_dir=output_dir,
         max_frames=max_frames,
@@ -891,6 +914,9 @@ def run_video(
         temperature=config.stt.temperature,
         prompt=prompt,
         proxy=config.network.proxy or None,
+        contact_sheet=contact_sheet,
+        cookies_from_browser=cookies_from_browser or None,
+        cookies_file=cookies_file or None,
         api_key=config.stt.api_key or "",
         url=config.stt.url or None,
     )
@@ -910,6 +936,7 @@ def run_video(
             "align_to_segments": align_to_segments,
             "transcribe": transcribe,
             "timestamps": timestamps,
+            "contact_sheet": contact_sheet,
         },
     )
 

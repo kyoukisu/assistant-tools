@@ -108,6 +108,7 @@
             socksio
             pyaes
             rsa
+            yt-dlp
           ] ++ [
             pythonSocks281
             telethon1432

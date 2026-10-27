@@ -73,6 +73,9 @@ class VideoConfig:
     align_to_segments: bool = True
     transcribe: bool = True
     timestamps: str = "segment"
+    contact_sheet: bool = True
+    cookies_from_browser: str = ""
+    cookies: str = ""
 
 
 @dataclass(slots=True)

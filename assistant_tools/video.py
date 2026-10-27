@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 from typing import Any
 from typing import cast
 
@@ -15,6 +16,18 @@ from assistant_tools import stt as stt_provider
 from assistant_tools.utils import AssistantToolsError
 from assistant_tools.utils import ensure_path_exists
 from assistant_tools.utils import require_stt_api_key
+
+
+REMOTE_SCHEMES: tuple[str, ...] = ("http://", "https://")
+DOWNLOAD_MAX_DURATION_SECONDS: int = 1200
+DOWNLOAD_MAX_BYTES: int = 512 * 1024 * 1024
+DOWNLOAD_MAX_HEIGHT: int = 720
+DOWNLOAD_TIMEOUT_SECONDS: float = 300.0
+METADATA_DESCRIPTION_LIMIT: int = 1200
+METADATA_TAG_LIMIT: int = 20
+SHEET_COLUMNS: int = 4
+SHEET_CELL_WIDTH: int = 360
+SHEET_MAX_FRAMES: int = 16
 
 
 @dataclass(slots=True)
@@ -34,6 +47,22 @@ class FrameArtifact:
     timestamp_seconds: float
     timestamp_hms: str
     path: str
+
+
+@dataclass(slots=True)
+class ContactSheet:
+    index: int
+    path: str
+    columns: int
+    rows: int
+    frame_indexes: list[int]
+
+
+@dataclass(slots=True)
+class SourceInfo:
+    kind: str
+    url: str | None
+    metadata: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -406,16 +435,270 @@ def find_nearest_segment(
     return best_segment
 
 
-def create_run_directory(base_output_dir: Path, input_path: Path) -> Path:
+def is_remote_source(source: str) -> bool:
+    return source.strip().lower().startswith(REMOTE_SCHEMES)
+
+
+def source_slug(source: str) -> str:
+    """Stable, filesystem-safe run directory name for a local path or URL."""
+    if not is_remote_source(source):
+        return Path(source).expanduser().stem or "media"
+    stripped: str = source.split("?", 1)[0].split("#", 1)[0].rstrip("/")
+    tail: str = stripped.rsplit("/", 1)[-1] or "remote"
+    return tail or "remote"
+
+
+def _sanitize_slug(value: str) -> str:
+    return "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in value)
+
+
+def _read_video_metadata(info_path: Path) -> dict[str, Any]:
+    try:
+        raw: Any = json.loads(info_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    entry: dict[str, Any] = cast(dict[str, Any], raw)
+    description: str = str(entry.get("description") or "")
+    raw_tags: Any = entry.get("tags")
+    tags: list[str] = []
+    if isinstance(raw_tags, list):
+        tags = [str(tag) for tag in cast(list[Any], raw_tags)][:METADATA_TAG_LIMIT]
+    duration: Any = entry.get("duration")
+    metadata: dict[str, Any] = {
+        "video_id": entry.get("id"),
+        "title": entry.get("title"),
+        "channel": entry.get("channel") or entry.get("uploader"),
+        "upload_date": entry.get("upload_date"),
+        "duration_seconds": float(duration) if isinstance(duration, (int, float)) else None,
+        "description": description[:METADATA_DESCRIPTION_LIMIT],
+        "description_truncated": len(description) > METADATA_DESCRIPTION_LIMIT,
+        "tags": tags,
+        "webpage_url": entry.get("webpage_url") or entry.get("original_url"),
+        "thumbnail_url": entry.get("thumbnail"),
+    }
+    return metadata
+
+
+def _ytdlp_command() -> list[str]:
+    return [sys.executable, "-m", "yt_dlp"]
+
+
+def download_remote_video(
+    *,
+    source: str,
+    destination: Path,
+    proxy: str | None = None,
+    cookies_from_browser: str | None = None,
+    cookies_file: str | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    """Fetch one bounded video and its metadata into destination."""
+    destination.mkdir(parents=True, exist_ok=True)
+    command: list[str] = _ytdlp_command() + [
+        "--no-playlist",
+        "--no-progress",
+        "--no-warnings",
+        "--write-info-json",
+        "--format",
+        f"bv*[height<={DOWNLOAD_MAX_HEIGHT}]+ba/b[height<={DOWNLOAD_MAX_HEIGHT}]/b",
+        "--merge-output-format",
+        "mp4",
+        "--max-filesize",
+        str(DOWNLOAD_MAX_BYTES),
+        # duration<?N passes when the site reports no duration (direct media links).
+        "--match-filter",
+        f"duration<?{DOWNLOAD_MAX_DURATION_SECONDS}",
+        "--retries",
+        "1",
+        "--socket-timeout",
+        "20",
+    ]
+    if proxy:
+        command.extend(["--proxy", proxy])
+    if cookies_from_browser:
+        command.extend(["--cookies-from-browser", cookies_from_browser])
+    if cookies_file:
+        command.extend(["--cookies", cookies_file])
+    command.extend(["--output", str(destination / "source.%(ext)s"), source])
+
+    try:
+        completed: subprocess.CompletedProcess[str] = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=DOWNLOAD_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as err:
+        raise AssistantToolsError(
+            f"Video download exceeded {DOWNLOAD_TIMEOUT_SECONDS:.0f}s: {source}",
+            error_type="download_timeout",
+            exit_code=2,
+        ) from err
+
+    if completed.returncode != 0:
+        detail: str = completed.stderr.strip().splitlines()[-1] if completed.stderr.strip() else ""
+        if "Sign in to confirm" in completed.stderr or "not a bot" in completed.stderr:
+            raise AssistantToolsError(
+                f"YouTube requires account cookies from this network: {source}. "
+                "Set [video] cookies_from_browser = \"firefox\" or pass --cookies-from-browser / --cookies.",
+                error_type="download_requires_cookies",
+                exit_code=2,
+            )
+        if "No module named yt_dlp" in completed.stderr:
+            raise AssistantToolsError(
+                "yt-dlp is not installed for this Python environment; reinstall kit with its declared dependencies",
+                error_type="missing_dependency",
+                exit_code=2,
+            )
+        raise AssistantToolsError(
+            f"Video download failed for {source}: {detail or 'unknown error'} "
+            f"(bounds: {DOWNLOAD_MAX_DURATION_SECONDS}s, {DOWNLOAD_MAX_BYTES // (1024 * 1024)} MiB)",
+            error_type="download_failed",
+            exit_code=2,
+        )
+
+    media_files: list[Path] = [
+        path
+        for path in sorted(destination.glob("source.*"))
+        if not path.name.endswith((".info.json", ".part", ".ytdl"))
+    ]
+    if not media_files:
+        raise AssistantToolsError(
+            f"Video download produced no media file for {source}; "
+            f"the {DOWNLOAD_MAX_DURATION_SECONDS}s / {DOWNLOAD_MAX_BYTES // (1024 * 1024)} MiB bounds may have skipped it",
+            error_type="download_failed",
+            exit_code=2,
+        )
+    metadata: dict[str, Any] = _read_video_metadata(destination / "source.info.json")
+    return media_files[0], metadata
+
+
+def build_contact_sheet(
+    *,
+    frames: list[FrameArtifact],
+    output_path: Path,
+    columns: int = SHEET_COLUMNS,
+    cell_width: int = SHEET_CELL_WIDTH,
+    cell_height: int | None = None,
+) -> ContactSheet | None:
+    """Compose already extracted frames into one timestamp-ordered grid image."""
+    if len(frames) < 2:
+        return None
+    ffmpeg_path: str = require_binary("ffmpeg")
+    sheet_columns: int = max(1, min(columns, len(frames)))
+    rows: int = math.ceil(len(frames) / sheet_columns)
+    width: int = max(64, cell_width)
+    height: int = max(64, cell_height if cell_height is not None else width)
+
+    command: list[str] = [ffmpeg_path, "-hide_banner", "-loglevel", "error", "-y"]
+    for frame in frames:
+        command.extend(["-i", frame.path])
+
+    filters: list[str] = []
+    for index in range(len(frames)):
+        filters.append(
+            f"[{index}:v]scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:color=0x101010[c{index}]"
+        )
+
+    row_labels: list[str] = []
+    for row_index in range(rows):
+        members: list[str] = [
+            f"c{index}" for index in range(len(frames)) if index // sheet_columns == row_index
+        ]
+        if len(members) == 1:
+            row_labels.append(members[0])
+            continue
+        inputs: str = "".join(f"[{member}]" for member in members)
+        filters.append(f"{inputs}hstack=inputs={len(members)}[r{row_index}]")
+        row_labels.append(f"r{row_index}")
+
+    if len(row_labels) == 1:
+        filters.append(f"[{row_labels[0]}]null[out]")
+    else:
+        inputs = "".join(f"[{label}]" for label in row_labels)
+        filters.append(f"{inputs}vstack=inputs={len(row_labels)}[out]")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    command.extend(
+        [
+            "-filter_complex",
+            ";".join(filters),
+            "-map",
+            "[out]",
+            "-frames:v",
+            "1",
+            "-q:v",
+            "3",
+            str(output_path),
+        ]
+    )
+    completed: subprocess.CompletedProcess[str] = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        stderr: str = completed.stderr.strip()
+        raise AssistantToolsError(
+            f"ffmpeg contact sheet failed: {stderr or 'unknown error'}",
+            error_type="contact_sheet_failed",
+            exit_code=2,
+        )
+    return ContactSheet(
+        index=1,
+        path=str(output_path.resolve()),
+        columns=sheet_columns,
+        rows=rows,
+        frame_indexes=[frame.index for frame in frames],
+    )
+
+
+def build_contact_sheets(
+    *,
+    frames: list[FrameArtifact],
+    output_dir: Path,
+    columns: int = SHEET_COLUMNS,
+    cell_width: int = SHEET_CELL_WIDTH,
+    cell_height: int | None = None,
+    max_frames_per_sheet: int = SHEET_MAX_FRAMES,
+) -> list[ContactSheet]:
+    sheets: list[ContactSheet] = []
+    for offset in range(0, len(frames), max_frames_per_sheet):
+        chunk: list[FrameArtifact] = frames[offset : offset + max_frames_per_sheet]
+        sheet: ContactSheet | None = build_contact_sheet(
+            frames=chunk,
+            output_path=output_dir / f"contact-sheet-{len(sheets) + 1}.jpg",
+            columns=columns,
+            cell_width=cell_width,
+            cell_height=cell_height,
+        )
+        if sheet is None:
+            continue
+        sheets.append(
+            ContactSheet(
+                index=len(sheets) + 1,
+                path=sheet.path,
+                columns=sheet.columns,
+                rows=sheet.rows,
+                frame_indexes=sheet.frame_indexes,
+            )
+        )
+    return sheets
+
+
+def create_run_directory(base_output_dir: Path, slug: str) -> Path:
     timestamp_slug: str = datetime.now().strftime("%Y%m%d-%H%M%S")
-    stem: str = input_path.stem or "media"
-    safe_stem: str = "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in stem)
+    safe_stem: str = _sanitize_slug(slug) or "media"
     run_dir: Path = base_output_dir.expanduser() / f"{safe_stem}-{timestamp_slug}"
     run_dir.mkdir(parents=True, exist_ok=True)
     return run_dir
 
 
-def analyze_local_video(
+def analyze_video(
     *,
     source: str,
     output_dir: str,
@@ -432,10 +715,26 @@ def analyze_local_video(
     temperature: float,
     prompt: str,
     proxy: str | None,
+    contact_sheet: bool = True,
+    cookies_from_browser: str | None = None,
+    cookies_file: str | None = None,
     api_key: str = "",
     url: str | None = None,
 ) -> dict[str, Any]:
-    input_path: Path = ensure_path_exists(source)
+    run_dir: Path = create_run_directory(Path(output_dir), source_slug(source))
+    source_info: SourceInfo = SourceInfo(kind="local", url=None, metadata={})
+    if is_remote_source(source):
+        input_path, metadata = download_remote_video(
+            source=source,
+            destination=run_dir / "source",
+            proxy=proxy,
+            cookies_from_browser=cookies_from_browser,
+            cookies_file=cookies_file,
+        )
+        source_info = SourceInfo(kind="url", url=source.strip(), metadata=metadata)
+    else:
+        input_path = ensure_path_exists(source)
+
     probe: MediaProbe = probe_media(input_path)
     if not probe.has_video:
         raise AssistantToolsError(
@@ -444,7 +743,6 @@ def analyze_local_video(
             exit_code=2,
         )
 
-    run_dir: Path = create_run_directory(Path(output_dir), input_path)
     transcript_payload: dict[str, Any] | None = None
     audio_artifact_path: Path | None = None
     if transcribe and probe.has_audio:
@@ -506,9 +804,25 @@ def analyze_local_video(
             }
         timeline.append(timeline_item)
 
+    contact_sheets: list[ContactSheet] = []
+    if contact_sheet:
+        cell_height: int | None = None
+        if probe.width and probe.height:
+            cell_height = max(64, round(SHEET_CELL_WIDTH * probe.height / probe.width))
+        contact_sheets = build_contact_sheets(
+            frames=frame_artifacts,
+            output_dir=run_dir,
+            cell_height=cell_height,
+        )
+
     manifest_path: Path = run_dir / "manifest.json"
     payload: dict[str, Any] = {
         "input": str(input_path.resolve()),
+        "source": {
+            "kind": source_info.kind,
+            "url": source_info.url,
+            "metadata": source_info.metadata,
+        },
         "run_dir": str(run_dir.resolve()),
         "manifest_path": str(manifest_path.resolve()),
         "probe": asdict(probe),
@@ -526,6 +840,7 @@ def analyze_local_video(
             "audio_artifact_path": str(audio_artifact_path.resolve()) if audio_artifact_path else None,
         },
         "frames": [asdict(item) for item in frame_artifacts],
+        "contact_sheets": [asdict(sheet) for sheet in contact_sheets],
         "timeline": timeline,
         "transcript": {
             "text": str(transcript_payload.get("text", "")) if transcript_payload else "",

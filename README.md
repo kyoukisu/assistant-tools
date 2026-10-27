@@ -16,7 +16,7 @@ Current command groups:
 - `extract` — URL extraction via Keenable, Exa, or Parallel with a fallback chain
 - `shardx` — client for a local ShardX-compatible browser control service
 - `vtt` — video to text via Supadata
-- `video` — local video/GIF to frames plus optional audio transcript
+- `video` — local video/GIF or URL to frames, source metadata, contact sheet, and optional audio transcript
 - `tg` — Telegram CLI via Telethon
 
 All command results go to stdout as JSON.
@@ -200,29 +200,45 @@ kit vtt https://youtu.be/dQw4w9WgXcQ --mode native
 kit vtt https://youtu.be/dQw4w9WgXcQ --chunks
 ```
 
-### Local video to frames + transcript
+### Video to frames, metadata, and transcript
 
-Requires local `ffmpeg` and `ffprobe` on `PATH`.
+Accepts a local file or an `http(s)` URL. URL downloads go through the bundled `yt-dlp`
+(no separate install) and are bounded to 1200s, 512 MiB, and 720p. `ffmpeg`/`ffprobe` must be on `PATH`.
 
 ```bash
 kit video ./clip.mp4
+kit video https://youtube.com/shorts/Rfrsxszvibw --no-transcribe
 kit video ./clip.mp4 --max-frames 30 --seconds-per-frame 2
 kit video ./clip.mp4 --timestamps word
 kit video ./clip.mp4 --at 3.5 --at 9 --at 12.2
 kit video ./clip.mp4 --no-align-to-segments
 kit video ./clip.mp4 --no-transcribe
 kit video ./animation.gif --max-frames 12
+kit video https://example.com/clip.mp4 --no-contact-sheet
+```
+
+For visual questions ("what game is this"), start with `--no-transcribe`: the frame grid and
+`source.metadata` (title, channel, description, tags) answer most of them without paying for STT.
+
+YouTube may demand an authenticated session from some networks. Then pass cookies:
+
+```bash
+kit video https://youtu.be/ID --cookies-from-browser firefox
+kit video https://youtu.be/ID --cookies ~/cookies.txt
 ```
 
 Default behavior:
 
+- downloads URLs into the run directory and records title, channel, description, tags, and duration under `source.metadata`
 - extracts up to `30` frames
+- composes one contact sheet per 16 frames (grid order = frame order, left to right, top to bottom)
 - spreads frames across the full duration
 - if transcript segments exist, nudges frame timestamps toward nearby speech segments
 - if `--at` is provided, extracts frames exactly near those second offsets instead of auto spreading
 - writes a run directory with:
   - `frames/`
-  - optional `audio.wav`
+  - `contact-sheet-N.jpg`
+  - optional `source/` (downloaded media) and `audio.wav`
   - `manifest.json`
 - returns JSON with:
   - frame paths
@@ -241,12 +257,17 @@ frame_format = "jpg"
 align_to_segments = true
 transcribe = true
 timestamps = "segment"
+contact_sheet = true
+# cookies_from_browser = "firefox"
+# cookies = "~/cookies.txt"
 ```
 
 Notes for agents:
 
 - `stt`/`video` with `timestamps = "segment"` already returns speech timing.
-- For a first pass, call `video` without `--at` and inspect `timeline` plus `frames`.
+- For a first pass, call `video` without `--at` and inspect `contact_sheets` first; open individual
+  `frames` only when a detail matters.
+- `source.metadata` is a hint, not proof: confirm the visible content in the frames too.
 - If a specific spoken moment matters, call `video --at <seconds>` to fetch only the frame(s) around those timestamps.
 - If there is no useful audio, the tool still returns evenly spread frames for visual inspection.
 
