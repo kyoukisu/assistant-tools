@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
+import re
 from datetime import UTC
 from datetime import datetime
 from getpass import getpass
@@ -461,20 +463,38 @@ async def miniapp_open(
         raise _error("miniapp_no_url", f"Mini App {bot} returned no launch URL", exit_code=3)
 
     client = ShardxClient.from_env()
+    session = identity
+    workspace = os.environ.get("BX_OWNER") is not None
     try:
-        client.request_json(
-            "POST",
-            f"/identities/{quote(identity, safe='')}/open",
-            json={"url": url, "live": live},
-        )
+        if workspace:
+            opened = client.request_json(
+                "POST", "/workspaces/open",
+                json={"identity": identity, "url": url, "live": live, "view": "status"},
+            )
+            # Native workspace endpoint uses json_ok's data envelope. Never fall
+            # back to the root identity on malformed/partial scope responses.
+            data = opened.get("data") if opened.get("ok") is True else None
+            alias = data.get("session_id") if isinstance(data, dict) else None
+            if not isinstance(alias, str) or re.fullmatch(r"ws-[A-Za-z0-9._-]{1,60}", alias) is None:
+                raise _error(
+                    "miniapp_workspace_invalid", "ShardX did not return a valid task workspace",
+                    exit_code=3,
+                )
+            session = alias
+        else:
+            client.request_json(
+                "POST",
+                f"/identities/{quote(identity, safe='')}/open",
+                json={"url": url, "live": live},
+            )
         if wait_ms > 0:
             client.request_json(
                 "POST",
-                f"/sessions/{quote(identity, safe='')}/wait",
+                f"/sessions/{quote(session, safe='')}/wait",
                 json={"seconds": wait_ms / 1000.0},
             )
         observation: dict[str, Any] = client.request_json(
-            "GET", f"/sessions/{quote(identity, safe='')}/observe"
+            "GET", f"/sessions/{quote(session, safe='')}/observe"
         )
     finally:
         client.close()
@@ -489,8 +509,9 @@ async def miniapp_open(
     return _ok(
         "tg.miniapp.open",
         {
-            "session": identity,
+            "session": session,
             "identity": identity,
+            **({"workspace": True, "browser_session": identity} if workspace else {}),
             "observation": safe_observation,
         },
         {

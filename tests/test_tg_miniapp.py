@@ -120,6 +120,7 @@ def test_miniapp_menu_requests_telegram_issued_url(monkeypatch: Any) -> None:
 
 
 def test_miniapp_open_fetches_url_and_opens_identity(monkeypatch: Any) -> None:
+    monkeypatch.delenv("BX_OWNER", raising=False)
     bot = SimpleNamespace(id=42)
     shardx_calls: list[tuple[str, str, dict[str, Any] | None]] = []
 
@@ -191,6 +192,96 @@ def test_miniapp_open_fetches_url_and_opens_identity(monkeypatch: Any) -> None:
     _check(shardx_calls[0][2] == {"url": "https://example.invalid/#test-menu-launch-url", "live": False})
     _check(shardx_calls[1][1] == "/sessions/ident/wait")
     _check(shardx_calls[2][1] == "/sessions/ident/observe")
+
+
+def test_miniapp_open_scopes_owner_and_hides_launch_response(monkeypatch: Any) -> None:
+    import httpx
+
+    from assistant_tools.models import CommandResult
+    from assistant_tools.shardx import ShardxClient
+
+    monkeypatch.setenv("BX_OWNER", "dsh-task")
+    launch = "https://example.invalid/#secret-launch-url"
+    calls: list[tuple[str, str, Any]] = []
+
+    async def launch_url(*args: Any) -> CommandResult:
+        return CommandResult(ok=True, command="tg.miniapp.main", provider="telegram", error=None, meta={},
+                             data={"url": launch})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        import json
+
+        assert request.headers["X-Browser-Owner"] == "dsh-task"
+        body = json.loads(request.content) if request.content else None
+        calls.append((request.method, request.url.path, body))
+        if request.url.path == "/workspaces/open":
+            return httpx.Response(200, json={"ok": True, "data": {
+                "session_id": "ws-owned", "workspace": True, "url": launch,
+                "model_text": launch,
+            }})
+        if request.url.path == "/sessions/ws-owned/wait":
+            return httpx.Response(200, json={"ok": True})
+        if request.url.path == "/sessions/ws-owned/observe":
+            return httpx.Response(200, json={"snapshot": "snap", "title": "App",
+                                            "controls": [], "url": launch, "model_text": launch})
+        raise AssertionError(request.url.path)
+
+    original = ShardxClient.from_env.__func__
+
+    def from_env(cls: Any) -> ShardxClient:
+        client = original(cls)
+        headers = dict(client.client.headers)
+        client.client.close()
+        client.client = httpx.Client(transport=httpx.MockTransport(handler), headers=headers)
+        return client
+
+    monkeypatch.setattr(commands, "miniapp_main_url", launch_url)
+    monkeypatch.setattr(ShardxClient, "from_env", classmethod(from_env))
+    result = asyncio.run(commands.miniapp_open(
+        _config(), "example_bot", "ident", "main", None, "tdesktop", False, False, 200, False
+    ))
+    assert result.data == {"session": "ws-owned", "identity": "ident", "workspace": True,
+                           "browser_session": "ident",
+                           "observation": {"snapshot": "snap", "title": "App", "controls": []}}
+    assert "secret-launch-url" not in str(result)
+    assert calls == [
+        ("POST", "/workspaces/open", {"identity": "ident", "url": launch,
+                                       "live": False, "view": "status"}),
+        ("POST", "/sessions/ws-owned/wait", {"seconds": 0.2}),
+        ("GET", "/sessions/ws-owned/observe", None),
+    ]
+
+
+def test_miniapp_bad_workspace_never_falls_back_to_root(monkeypatch: Any) -> None:
+    import pytest
+
+    from assistant_tools.models import CommandResult
+    from assistant_tools.utils import AssistantToolsError
+
+    monkeypatch.setenv("BX_OWNER", "dsh-task")
+    calls: list[str] = []
+
+    async def launch_url(*args: Any) -> CommandResult:
+        return CommandResult(ok=True, command="tg.miniapp.main", provider="telegram", error=None, meta={},
+                             data={"url": "https://example.invalid/#secret"})
+
+    class FakeShardxClient:
+        def request_json(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+            calls.append(path)
+            return {"ok": True, "data": {"session_id": "ident", "url": "SECRET"}}
+
+        def close(self) -> None:
+            calls.append("close")
+
+    monkeypatch.setattr(commands, "miniapp_main_url", launch_url)
+    monkeypatch.setattr("assistant_tools.shardx.ShardxClient.from_env",
+                        classmethod(lambda cls: FakeShardxClient()))
+    with pytest.raises(AssistantToolsError, match="valid task workspace") as error:
+        asyncio.run(commands.miniapp_open(
+            _config(), "example_bot", "ident", "main", None, "tdesktop", False, False, 0, False
+        ))
+    assert "SECRET" not in str(error.value)
+    assert calls == ["/workspaces/open", "close"]
 
 
 def test_miniapp_open_parser() -> None:

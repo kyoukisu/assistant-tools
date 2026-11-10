@@ -24,6 +24,26 @@ def mock_client(handler: Any) -> ShardxClient:
     return ShardxClient("http://shardx.test", client=httpx.Client(transport=transport))
 
 
+def test_from_env_owner_header_is_scoped_and_legacy_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    for owner in (None, "dsh-task"):
+        if owner is None:
+            monkeypatch.delenv("BX_OWNER", raising=False)
+        else:
+            monkeypatch.setenv("BX_OWNER", owner)
+        client = ShardxClient.from_env()
+        try:
+            assert client.client.headers.get("X-Browser-Owner") == owner
+        finally:
+            client.close()
+
+
+def test_invalid_owner_fails_without_disclosing_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BX_OWNER", "SECRET\r\nInjected: true")
+    with pytest.raises(AssistantToolsError, match="Invalid BX_OWNER") as error:
+        ShardxClient.from_env()
+    assert "SECRET" not in str(error.value)
+
+
 def test_parser_exposes_shardx_commands() -> None:
     parser = build_parser()
     args = parser.parse_args(["shardx", "read", "--session", "s1"])

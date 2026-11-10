@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 from typing import cast
@@ -43,7 +44,16 @@ class ShardxClient:
                 error_type="invalid_config",
                 exit_code=2,
             ) from err
-        return cls(os.environ.get("SHARDX_URL", DEFAULT_URL), timeout_seconds)
+        owner = os.environ.get("BX_OWNER")
+        if owner is not None and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", owner) is None:
+            raise AssistantToolsError(
+                "Invalid BX_OWNER", error_type="invalid_config", exit_code=2
+            )
+        result = cls(os.environ.get("SHARDX_URL", DEFAULT_URL), timeout_seconds)
+        if owner is not None:
+            # Client-wide defaults also cover binary downloads and file uploads.
+            result.client.headers["X-Browser-Owner"] = owner
+        return result
 
     def close(self) -> None:
         if self._owns_client:
