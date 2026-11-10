@@ -471,10 +471,9 @@ async def miniapp_open(
                 "POST", "/workspaces/open",
                 json={"identity": identity, "url": url, "live": live, "view": "status"},
             )
-            # Native workspace endpoint uses json_ok's data envelope. Never fall
-            # back to the root identity on malformed/partial scope responses.
-            data = opened.get("data") if opened.get("ok") is True else None
-            alias = data.get("session_id") if isinstance(data, dict) else None
+            # Native json_ok is flat: {status: "ok", session_id: ..., ...}.
+            # Never fall back to the root on malformed/partial scope responses.
+            alias = opened.get("session_id") if opened.get("status") == "ok" else None
             if not isinstance(alias, str) or re.fullmatch(r"ws-[A-Za-z0-9._-]{1,60}", alias) is None:
                 raise _error(
                     "miniapp_workspace_invalid", "ShardX did not return a valid task workspace",

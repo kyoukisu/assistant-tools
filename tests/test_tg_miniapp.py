@@ -215,10 +215,10 @@ def test_miniapp_open_scopes_owner_and_hides_launch_response(monkeypatch: Any) -
         body = json.loads(request.content) if request.content else None
         calls.append((request.method, request.url.path, body))
         if request.url.path == "/workspaces/open":
-            return httpx.Response(200, json={"ok": True, "data": {
-                "session_id": "ws-owned", "workspace": True, "url": launch,
-                "model_text": launch,
-            }})
+            return httpx.Response(200, json={
+                "status": "ok", "session_id": "ws-owned", "workspace": True,
+                "url": launch, "model_text": launch,
+            })
         if request.url.path == "/sessions/ws-owned/wait":
             return httpx.Response(200, json={"ok": True})
         if request.url.path == "/sessions/ws-owned/observe":
@@ -268,7 +268,7 @@ def test_miniapp_bad_workspace_never_falls_back_to_root(monkeypatch: Any) -> Non
     class FakeShardxClient:
         def request_json(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
             calls.append(path)
-            return {"ok": True, "data": {"session_id": "ident", "url": "SECRET"}}
+            return {"status": "ok", "session_id": "ident", "url": "SECRET"}
 
         def close(self) -> None:
             calls.append("close")
